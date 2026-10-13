@@ -1,342 +1,62 @@
-# SolidWorks 本体全覆盖目标
+# Coverage: covered vs not covered
 
-范围为 SolidWorks 自身的建模、草图、文档、装配体、工程图、钣金、焊件、曲面、
-模具、配置、属性、测量、数据导入导出与原生自动化接口，也包括 SolidWorks
-官方自带或随附的功能模块。嘉立创等第三方厂商插件不在范围内。
-Simulation、Motion、CAM、Routing 等官方模块需核对本机安装、许可证和接口，
-不能因尚未验证或未安装就从覆盖目标中排除。
+English | [简体中文](COVERAGE.zh-CN.md)
 
-全覆盖目标仍在进行。已有工具数量不能证明全覆盖，类型库成员数量也不是功能覆盖率。
+Goal: native coverage of SOLIDWORKS itself and the modules it ships or bundles.
+Third-party vendor add-ins (JLC/嘉立创 and similar) are out of scope.
 
-## 完成判据
+*Covered* means a dedicated tool with explicit units and selection rules that
+reads the real result back and has been verified against a live session.
+Anything weaker is listed as not covered. 192 tools are registered today; that
+is a count, not a coverage claim.
 
-1. 原生功能清单中的操作有明确工具、参数、单位、选择规则和结果读取方式。
-2. 不用任意 COM 调用器、宏执行器或仅能返回成功的占位工具充当功能实现。
-3. 创建与修改操作在真实 SolidWorks 文档中执行，读取实际几何、状态或文件验证结果。
-4. 有实机回归、离线边界检查、安装包检查及 MCP 协议验证。
-5. 每个仍未实现或未验证的操作保留为缺口；不能以跳过测试消除缺口。
+## Core SOLIDWORKS
 
-## 需逐项覆盖的原生功能域
+| Domain | Covered | Not covered |
+| --- | --- | --- |
+| Session and documents | Attach/status, active-document info, new part/assembly/drawing, open, save, save-as, activate, close, running-instance list and PID selection, rebuild with failing-feature report | DXF/DWG and PDF export, template pick by name, external references / pack-and-go, version upgrade |
+| Reference geometry and curves | Planes (offset / angle / midplane / three points / parallel through point), axes, reference points (circle centres, midpoints, face centres, distance / percentage / even spacing, intersections, sketch points, projection onto a model face), coordinate systems, curves through XYZ points (create, read, edit), composite curves, helix | Projection onto a reference plane (native call returns empty here), projected curves, split lines, intersection curves |
+| Sketches (2D and 3D) | Create / edit / close / list on planes or model faces, native 3D sketches, lines, centrelines, circles, rectangles, arcs, three-point arcs, ellipses, polygons, slots, points, splines (XYZ in 3D), fillet, chamfer, trim, offset, mirror, convert entities, construction geometry, relations, driving dimensions (2D and 3D X/Y/Z), sketch and point queries | Sketch text, blocks, sketch pictures, sketch patterns, repair sketch, working-plane orientation in 3D sketches, assembly Z directional dimension on this machine |
+| Solid features | Boss/cut extrude (incl. through-all-both), revolve, fillet, chamfer, shell, draft, rib, simple hole, sweep, loft, linear and circular pattern, mirror, delete / rename / suppress, ordered feature list | Boundary boss/base, threads, hole wizard and hole series, split, indent, intersect, deform, flex, freeform, thin features, multi-thickness shell, draft analysis |
+| Multibody and direct editing | Scale (uniform or X/Y/Z, about centroid or origin), move / copy / rotate bodies, combine (add, subtract, intersect), delete / keep bodies, move face (offset, translate, rotate), delete face with patch, replace face | Save bodies, split bodies, mirror bodies, delete-face fill and tangent-fill modes (created but not confirmed), import-geometry repair |
+| Surfaces | Extruded, planar, revolved, lofted, swept, boundary, ruled and filled surfaces, extend, untrim, trim (preview, apply, data), knit, thicken, offset, mid-surface (create and data), surface-hole deletion, cut with surface, surface-body area listing | Mutual-trim knit variant, fill curvature continuity (not confirmed here), ruled reverse-normal (not confirmed here), mid-surface placement (ignored here), surface flatten, mesh BREP |
+| Sheet metal | Base flange, parameter read/edit (thickness, bend radius, K-factor), flatten / fold, flat-pattern DXF export | Edge flange, miter flange, hem, jog, closed corner, corner relief, convert to sheet metal, forming tools, bend tables |
+| Weldments | Weldment feature, profile listing, size configurations, structural members, cut-list read and update | Trim / extend members, end caps, gussets, weld beads, bounding box, structural systems |
+| Assemblies and mates | Component insert / list / fix / visibility / suppression / configuration, add and list mates | Replace, delete, pattern and mirror components, virtual components, in-place editing, subassemblies, mate limits, mechanical mates (gear, screw, rack and pinion, cam, hinge, coupler), interference and clearance checks, explode, display states, section views |
+| Drawings | Sheets, standard / model / projected / section / detail views, view sketches, model annotations, auto-dimension, centre marks and lines, notes, view move / scale / label | Auxiliary, broken-out, alternate-position and crop views, view alignment, BOM / hole / revision tables, tolerances, GD&T, surface finish, weld symbols, hole callouts, balloons, blocks, sheet formats |
+| Configurations, properties, equations, materials | Configuration create / activate / delete / list, document and configuration custom properties (read, write, delete, type and resolved value), equations and global variables (add, set, delete, evaluate), material-library search, material and appearance assignment | Derived configurations, design tables, per-configuration feature and dimension control, display states, custom property tabs and property files |
+| Inspection and measurement | Face / edge / vertex / body listing with filters (surface type, area, normal, curve type, length), mass properties, bounding box, measure, error report, screenshots, named views | Interference and clearance, curvature and draft analysis, thickness analysis, section properties, geometry validity and repair |
+| Moulds | — | Parting lines, parting surfaces, shut-off surfaces, mould split, core, cavity |
+| Data interchange | STEP, IGES, STL, Parasolid, 3MF and image export; flat-pattern DXF export; native part / assembly / drawing open | DXF/DWG and PDF import or export, drawing export to PDF/DXF/DWG, reference management |
 
-| 功能域 | 操作范围 |
-| --- | --- |
-| 文档与文件 | 新建、打开、切换、保存、关闭、模板、导入、导出、单位、引用关系 |
-| 草图 | 2D/3D、几何、约束、驱动尺寸、裁剪、延伸、转换、偏移、阵列、块、文字 |
-| 实体特征 | 拉伸、旋转、扫描、放样、边界、圆角、倒角、抽壳、拔模、筋、孔、包覆、螺纹 |
-| 多实体 | 移动、复制、缩放、组合、分割、删除、保留、镜像、阵列、保存实体 |
-| 曲面 | 拉伸、旋转、扫描、放样、边界、平面、填充、偏移、延伸、修剪、解除修剪、缝合、加厚、替换面 |
-| 直接编辑 | 移动面、删除面、替换面、导入几何修复 |
-| 钣金 | 基体法兰、边线法兰、斜接法兰、折弯、褶边、转折、闭合角、角释放、展开、折叠、转换、成形、展开导出 |
-| 焊件与结构系统 | 结构构件、轮廓、构件组、剪裁、延伸、顶端盖、角撑板、焊缝、切割清单、边界框、结构系统 |
-| 参考与曲线 | 基准面、轴、点、坐标系、螺旋线、投影曲线、组合曲线、通过点曲线、分割线 |
-| 阵列 | 线性、圆周、镜像、曲线驱动、草图驱动、表格驱动、填充、变量阵列 |
-| 装配体 | 插入、定位、替换、删除、配置、显示、抑制、虚拟组件、就地编辑、阵列、镜像、子装配体 |
-| 配合 | 标准、距离/角度限制、对称、宽度、槽、齿轮、螺杆、齿条、小齿轮、凸轮、铰链、线性耦合、配合控制 |
-| 装配体分析与表现 | 干涉、间隙、爆炸、爆炸步骤、剖视、显示状态、运动算例基础动画 |
-| 工程图视图 | 图纸、模型/投影/剖面/局部/辅助/断裂/断开的剖视、替代位置、裁剪、视图对齐 |
-| 工程图标注 | 尺寸、公差、形位公差、粗糙度、焊接符号、孔标注、中心标记/线、注释、气泡、图块 |
-| 工程图表格 | BOM、孔表、修订表、焊件切割清单、通用表、排序、行列与单元格编辑 |
-| 配置与数据 | 配置、派生配置、尺寸/特征配置、方程、全局变量、自定义属性、设计表、显示状态 |
-| 材料与显示 | 材质库、材质、颜色、外观、纹理、视图、相机、光源、场景、截图 |
-| 检查与测量 | 实体/曲面/拓扑、体积、质量、惯量、距离、角度、曲率、截面、几何有效性、重建错误 |
-| 模具 | 分型线、分型面、关闭曲面、模具分割、型芯、型腔 |
-| 原生数据交互 | STEP/IGES/Parasolid/STL/3MF、DXF/DWG、PDF、工程图与模型输出、原生文档引用 |
-| 官方随附模块 | Simulation、Motion、CAM、Routing 及其他官方随附功能，按实际接口、安装与许可证验证 |
+## Bundled modules
 
-这些类别是执行清单，不是已经完成的声明；细项将结合本机类型库持续展开。
+| Module | Covered | Not covered |
+| --- | --- | --- |
+| Motion (22 tools) | Study create / duplicate / delete / activate / list / type / timing; motion-feature listing; gravity, linear and rotational motors, linear force and torque, linear/torsional/motion springs, linear/torsional dampers, 3D contact; native solve; result sampling (centre of mass, linear and angular velocity/acceleration, Euler angles); animation timeline; playback control; frame export (BMP/PNG) | Charts and CSV results, frame-rate read/write, image size and scale, motion event callbacks, AVI/JPG encoding, PhotoWorks renderer, real dynamics (needs the ADAMS solver), non-constant force functions, torsional-motion spring coil geometry, cross-document activation after solve |
+| Simulation | — | Not inventoried: the local `cosworks.dll` type library fails to load (`-2147312566`) |
+| CAM | — | Type library not found at the expected path; module presence not established |
+| Routing | — | Inventoried (14 interfaces, 142 members); no tools |
+| Costing | — | Inventoried (14 interfaces, 296 members); no tools |
+| DimXpert | — | Inventoried (51 interfaces, 253 members); no tools |
+| Inspection | — | Inventoried (5 interfaces, 162 members); no tools |
+| Sustainability | — | Inventoried (9 interfaces, 102 members); no tools |
+| DFMXpress | — | Inventoried (2 interfaces, 12 members); no tools |
+| ScanTo3D | — | Inventoried (1 interface, 3 members); no tools |
 
-## 当前新增实现与验证
-
-默认工具共 192 个，仍未全覆盖。前一批新增 22 个：钣金 6 个、焊件 6 个、
-曲面编辑 3 个、Motion 算例管理 7 个；随后新增 8 个 Motion 工具：运动特征查询、
-重力与线性/旋转马达创建、求解与结果读取、动画序列、播放控制、帧序列/视频导出；
-本批新增 4 个 Motion 载荷工具：力/力矩、弹簧、阻尼、3D 接触。
-
-新增包覆创建与只读检查 2 个工具。在六个新建圆柱零件上实测凸起、凹陷、
-刻划及解析/样条方法：解析凸起增加 42 mm³、凹陷减少 38 mm³，样条结果误差
-小于 0.007 mm³；刻划保持体积并把实体面数从 3 增加到 4。读回原生模式、
-厚度、源草图与目标/拉伸方向存在状态，读取几何前释放原生选择回滚。
-IWrapSketchFeatureData 不暴露方法、网格精度和全部目标面，查询明确列为不可读取。
-第一阶段支持单个实体面、闭合二维草图和默认方向。
-
-随后扩展多目标面与指定拉伸方向，新增 `set_wrap_parameters`。在十二个新建零件上
-验证横跨两个分割圆柱面的三种模式及解析/样条方法：解析凸起增加 168 mm³，凹陷
-减少 152 mm³；样条误差小于 0.03 mm³。基准面、草图线、实体直边方向以体积和
-原生持久引用核验；`IsSame` 对本机两个同一基准面的 COM 引用返回不同，不能据此
-误判方向丢失。厚度从 1 改为 2 mm、模式互换、指定新方向均已重建并核验体积。
-反向参数虽能保存，但在本机案例的体积和包覆位置未变化，仍不能宣称几何反向生效。
-清除方向的 null dispatch 被原生接口接受，却仍保留旧方向；普通 None、空/Null VARIANT
-被拒绝。两项均按未确认状态返回失败并保留特征。修改目标面、方法和网格
-以及其他复杂曲面、旧版软件验证仍保留为覆盖缺口。多面创建要求现代接口，旧接口
-不能降级丢弃多面或样条参数。
-
-新增源草图替换与原生单 `Face` 字段的前置几何读回；`SourceSketch` 必须传入
-`Sketch`，不能用 `Feature` 代替。原生持久引用的 memoryview 被复制为字节快照，
-在回滚/重建后核验实际引用。八个新建双实体零件验证解析/样条三模式下的窄/宽
-草图切换；解析宽草图的凸起/凹陷为 +84/-76 mm³，刻划保持体积，另一个实体保持。
-目标面 setter 虽立即接受新引用，重建后仍读回旧面；旧接口也存在相同行为。
-同时改源草图与目标面时可能只有源草图生效，工具分别报告引用确认状态并返回失败。
-连接的阶梯圆柱也验证了同一实体上的面与草图联合修改：实际包覆转到小圆柱区域，
-但 `Face` 字段仍是旧面；不能把该字段当作现代包覆全部影响面的清单。
-多面替换、目标面引用保存、后置草图/复杂依赖、方法/网格修改和前述原生缺口仍待补齐。
-钣金验证板厚修改后的体积、展开/折叠状态及 DXF 实际几何；焊件验证管材
-解析体积、长度变化及切割清单；曲面验证缝合面积、加厚体积和偏移距离。
-Motion 在新建零件和装配体上验证算例生命周期、类型及时间轴读回；运动特征、
-求解与结果读取、动画与导出的实测记录见后文 Motion 一节。
-
-随后新增 11 个直接编辑、参考点、坐标系及 XYZ/组合曲线工具。
-移动面的偏移、平移、旋转，删除面与修补孔，以及替换面均通过实际体积或面积检查；
-参考点与坐标系读回实际坐标和矩阵，XYZ 曲线创建/修改读回实际通过点。
-组合曲线使用原生选择标记 1，曲线点数按实际坐标数组长度转换。
-删除面的填充、相切填充等模式仍保留为未验证细项，不能据此宣称直接编辑全覆盖。
-参考点的圆心、中点、面中心、距离/百分比/均匀分布、草图点、交点和投影到模型面已验证。
-投影到基准面在本机 `InsertReferencePoint` 实测返回空，仍是待补齐项；未从目标中排除。
-
-新增旋转曲面、放样曲面和曲面切除 3 个工具。旋转曲面的单向、中面、双向模式
-以圆柱侧面积验证；双圆截面放样也以圆柱侧面积验证。曲面切除验证两个方向，
-以及限定一个实体时另一个实体的体积保留。放样的导引线、闭合、多种端部相切条件，
-曲面切除的保留片区参数仍未专项验证。
-
-新增曲面延伸和解除修剪 2 个工具，复用拓扑查询增加 `body_type=surface`，
-选择使用独立的 `surface_faces`、`surface_edges` 索引。实体查询默认行为保持不变。
-延伸验证单边、全部面边界、线性/同曲面延伸、到指定点和到实体面的面积。
-解除修剪验证内孔填补、外边界恢复、合并/独立曲面、反向保留区域，
-以及按自然边界的百分比扩展边、连接端点填补缺角。扩展百分比直接传入原生接口，
-不能按毫米换算。测试以面积、边类型和端点核验，独立曲面不依赖实体返回顺序。
-曲面修剪、复杂非平面延伸及解除修剪的其他组合仍保留为缺口。
-
-新增填充曲面与直纹曲面 2 个工具。填充验证草图边界、内孔、接触与相切控制，
-合并与独立曲面，以及补面封闭立方体后的实际体积；控制参数读取原生特征定义核验。
-内约束曲线、关闭优化后的分辨率读回也已验证。
-直纹验证相切、法向、沿向量扫描、锥度及垂直向量模式，以面积、面法向和特征参数核验。
-垂直向量的反向、替换参考面及修剪缝合也已通过端点、面法向或原生选项读回核验。
-锥角在创建接口未按输入生效时，使用原生特征定义修改，读回确认后才返回成功。
-本机填充曲率控制传入 `swCurvature=2` 后，原生 `GetCurvatureControl` 返回 `-1`，
-`SetCurvatureControl` 也返回失败；多个选择标记下结果相同。工具保留该参数并明确
-返回未确认状态，不能以生成了一个补面当作曲率连续性成功，该细项仍未完成。
-多组混合连续性、复杂非平面补面、反向选项、直纹连接面的删除和其他组合仍待专项验证。
-法向直纹曲面的反向参数在新旧创建接口实测均未改变方向，修改原生距离也未改变方向；
-该请求会返回未确认状态并保留已创建特征的信息，仍是待补齐项。
-
-新增 `delete_surface_holes`，按 `surface_edges` 选择孔边界。三孔平面实测只补选中孔，
-以剩余圆边周长计算剩余孔面积，再同时补其余两孔恢复 200 mm²；外边界、
-曲面体数量及非实体状态均保持正确。新接口与强制旧接口路径均通过本机验证。
-旧版本软件尚未实测，网格 BREP 不属于此接口支持范围。
-
-新增 `surface_sweep`，验证开口/闭合轮廓、数值圆截面、保持法向、单/双导引线，
-第一/第二/双向扫描与反向扭转，以及相切、平滑、合并选项的原生读回。
-第一方向的反向采用带符号角度并修改原生定义；第二方向使用独立的角度通道，
-同时读取原生参数、边界和中间截面坐标核验几何。扭转曲面使用原生导数独立积分
-与解析面积比较；GetArea 为近似值，双向过渡曲面不假定为两个独立螺旋面。
-截面点到预期扭转方向的偏差要求小于 0.01 mm，面积积分沿用 0.05 mm² 容差。
-现代定义接口要求 SW 2018+，仅 SW 2026 SP3.2 已实测。曲线/模型边作为路径与轮廓、
-复杂弯曲导引、弯曲路径上的法向控制、端部相切、方向向量、最小扭转、法向恒定同时扭转及旧版创建接口仍有缺口。
-
-新增中面创建与只读检查 2 个工具，实测平板、带孔板、L 形薄壁和圆管。
-平板面积 200 mm²、中面 Z=1 mm、厚度 2 mm；L 形中面面积 840 mm²，
-读取两组原始面配对，缝合/独立曲面体分别为 1/2；圆管中面半径 6 mm，
-面积 2π×6×30 mm²。只读查询不新增特征，原始实体体积保持不变。
-本机新创建接口的非零 Placement（-1、-0.5、0.5、1）均仍生成中央中面，
-旧接口在本机未生成中面。工具用中面点到原始
-配对面的距离核验实际位置，参数未生效会保留特征信息并返回失败，此细项仍未完成。
-装配体上下文、指定面配对、多实体和更复杂曲面及旧版本软件仍待覆盖或专项验证。
-
-新增曲面修剪预览、创建和只读数据查询 3 个工具。标准修剪以基准面、草图、
-曲面体与曲面面作为工具；预览返回临时区域面积、边界、选择点和稳定排序的索引。
-12 个临时零件验证了 40/60 mm² 两侧保留与删除、圆草图内外区域 4π/100−4π mm²、
-多目标共 80 mm²、相互修剪后 90 mm² 和圆柱侧面保留 2π×5×4 mm²。
-重复预览不新增特征、不改变曲面体查询；特征数据查询与创建时原生读回一致。
-原生选择使用 `ISelectData.X/Y/Z`，只传临时实体指针会留下默认区域。
-相互修剪重复预览后按实体名称重新解析原始曲面，避免原始 `IBody2.Select2` 卡住。
-本机相接曲面的相互修剪即使 `PostTrimSurface(false)` 仍生成一个合并曲面体；
-工具检测数量并返回失败、保留已创建特征，此参数变体没有完成。
-旧的 `ModelDoc2.PostTrimSurface(false)` 探测生成了错误的保留面积，未采用该路径。
-形成实体、更多非平面组合、开放草图投影修剪与旧版本软件仍保留为缺口。
-
-新增已有 SolidWorks 实例查询和明确选择 2 个工具。本机默认 COM 注册指向另一个
-建模调用异常的实例，按 PID 连接已有可用实例后完成了新建、建面和关闭测试。
-实例选择仅作用于 MCP 服务进程，不启动或关闭 SolidWorks，也不切换用户窗口。
-所选实例退出后不自动替换；只读可访问不等于建模健康。
-
-上述验证均使用新建测试文档。Motion 的力/力矩、弹簧、阻尼与 3D 接触在后续批次
-实现并读回原生定义；曲线图与 CSV 读取仍未实现；Simulation、CAM、Routing 等
-官方模块继续保留为待覆盖项。
-
-新增边界曲面创建及原生定义查询 2 个工具。12 个临时零件验证单/双方向、
-三个轮廓、按两个方向分别修剪及同时修剪、圆草图/模型边轮廓、法向条件和形成实体。
-双方向完整延伸面积 400 mm²，单向修剪面积 200 mm²，双向修剪面积 100 mm²；
-半径 5 mm、高 10 mm 圆柱的形成实体体积为 785.398163 mm³。
-曲线选择标记为 `8192*(顺序+1)+方向+1`，需先选完全部曲线再设置条件。
-本机创建接口返回空时，从新增特征树恢复 `NetBlend` 后核验实际曲线、控制和实体类型。
-
-输入圆端面的相切/曲率请求虽分别读回类型 3/4，但输出仍为圆柱侧面，
-边界法向与输入平面法向差 90°，未达到 G1，更不能声称 G2。工具用输入边界采样、
-输出法向与第二基本形式核验连续性；不符时保留特征并返回未确认状态。
-第二基本形式在共同的世界坐标切向基底比较，曲率单位为 1/mm；不同参数化不能直接比较导数值。
-控制柄修改与方向向量、中心线、更多开放轮廓法向条件、闭合方向和复杂曲线组合仍待覆盖或专项验证。
-探索 `ModifyDefinition` 曾改变输出实体类型，未用它校正曲面控制。旧创建方法仅离线调度验证，旧软件未实测。
-
-## 圆顶验证
-
-圆顶新增创建、定义查询与参数编辑 3 个工具。创建接口返回空时从特征树恢复
-`Dome`，随后验证原生定义、实际体积和中心高度。B-spline 包围盒会过度估计高度，
-不作为高度成功依据。圆形和椭圆形边界的椭球模式另检查 24 个理论表面点，
-距离容差为 0.01 mm；椭球原生曲面是近似表示，体积回归容差为 0.2%，
-不能声称与理想椭球完全一致。草图点约束会使原生高度读回为 0，需检查约束点位置
-和实际曲面距离。整体点草图约束支持单点、多点以及混合几何中的显式用户点，
-逐点转换为模型坐标并检查最大点到曲面距离；线端点、圆心等内部生成点不作为
-隐含约束。纯曲线、空草图会在修改前拒绝，避免原生无有效约束点时产生默认圆顶。
-`clear_constraint` 要求同时指定恢复的高度，`clear_direction` 与指定新方向互斥；
-已有控制的清除用带类型的空引用尝试并检查引用是否实际消失。SW 2026 SP3.2
-仍保留控制，工具返回失败；普通 None/空 Variant 可被原生拒绝，明确类型的原生
-属性调用及 PROPERTYPUTREF 同样未清除约束。不以原生接受请求作为成功依据。
-方向边按原生直线向量读取方向，并沿该向量检查距离、最近点误差和体积变化符号。
-例如 −Z 方向的体积减少不能按默认面法向误判；本机该方向的几何虽符合要求，
-输出边在回滚前后的持久引用未确认，整次修改仍返回失败。平行目标面的方向仍可能
-压平圆顶。复杂非平面、多面组合、控制实际清除、方向引用与倾斜椭球及旧版软件
-仍待覆盖或专项验证。
-
-## 3D 草图验证
-
-3D 草图新增创建和点读取 2 个工具，并扩展现有线、点和样条的 XYZ 参数。
-`ProfileFeature` 与 `3DProfileFeature` 均可解析；编辑、关闭和建模前自动退出
-根据 `ISketch.Is3D` 使用对应原生接口，不以 2D 插入接口切换 3D 编辑状态。
-重新编辑较早草图时，以冻结的持久引用识别活动草图及名称，不假定活动草图始终最新。
-零件和装配体实测 XYZ 线端点 (10,20,30) mm、长度 37.416574 mm；样条通过
-(20,0,0)、(25,5,8)、(30,0,15) mm，原生长度 21.025226 mm，插值点到曲线
-距离另行核验。点读取保留内部/用户/样条点与原生索引，同时返回草图和模型坐标。
-2D 非零 Z 在创建前拒绝；已有编辑状态时拒绝再次创建，避免误关闭已有草图。
-零件与装配体另验证 3D 线的构造几何切换和固定约束添加，未据此宣称完整约束覆盖。
-安装回归另发现原生圆和线创建在自动推断模式下偶发返回空；创建局部使用 `AddToDB`
-并在成功或异常后恢复原值，随后核验线端点、圆心、半径及新增几何，不盲目重试创建。
-3D 直线路径圆截面扫描半径 1 mm、路径长度 √1400 mm，实际面积
-235.095267 mm²，并验证创建特征前自动退出 3D 草图。
-XYZ 构造线绕开本机原生 `CreateCenterLine` 的 Z 压平行为，复用 `CreateLine` 并核验
-实际构造属性。三点圆弧在零件/装配体中验证 YZ 平面半径 5 mm 半圆和 270° 大圆弧，
-弧长分别 15.707963/23.561945 mm；半径、弧长、端点和三个点的原生曲线距离均核验。
-重合/共线输入前置拒绝。重叠共端点组合原生结果偏离输入，返回失败并保留特征；
-倾斜 3D 椭圆虽返回对象，但原生长度为 -1 且 GetCurve 为空，尚未宣称支持。
-3D 圆/其他圆弧变体等其他几何、
-工作平面、完整约束/驱动尺寸、复杂扫描/放样组合与旧版软件仍待覆盖或专项验证。
-
-## 空间圆和椭圆转换
-
-2D 椭圆创建局部使用 `AddToDB` 并恢复原值，核验 24 个理论点和独立积分周长；
-轴方向、非零半轴和长短轴关系前置检查。直接 3D 椭圆接口会产生无有效曲线的对象，
-在修改前拒绝，并提供平面草图再转换的路径。
-`convert_entities` 不再仅相信原生布尔返回值，检查新增段、有效曲线和长度。
-新增段按冻结的持久引用识别，不假定原生输出顺序；已有空间线在转换前后单独保留。
-支持的单独草图段选择另外读取带类型的 BYREF 参数范围，每段 25 个源点转换至目标
-草图坐标后比较输出曲线；关闭链时核验总长度，开启链时输出总长度不得缩短。
-部分圆弧、混合模型边/面等其他选择仍只核验有效输出，对应几何标为未核验。
-前视/上视/右视和偏移 5 mm 平面四个零件实测通过；空间圆保持圆类型，椭圆原生
-转换为样条，周长 48.442241 mm，最大采样误差约 5.46e-11 mm。
-SetWorkingPlaneOrientation 虽返回 True，但原生圆仍为 XY 法向、椭圆仍无曲线；
-CreateSketchPlane 返回 True、选中类型 133，但未读到有效对象或确认后续方向。
-这些接口的接受状态不作为工作平面支持证据。任意工作平面编辑/持久化、直接 3D 椭圆、
-部分圆弧/混合选择完整对应核验、复杂依赖和旧软件继续保留缺口。
-
-## 3D 方向尺寸
-
-新增 `add_3d_dimension` 使用原生 AddAlongX/Y/ZDimension，限制为编辑中的 3D 草图。
-选取两个不同点索引并冻结持久引用，读取线性尺寸类型、原生数值及实际投影间距。
-SetSystemValue3 虽即时读回数值，几何却延迟求解；EditRebuild3 会求解并退出编辑，
-工具重建后按持久引用恢复原草图，并核验同一对点的实际距离，不以参数值作为几何证明。
-零件 XYZ 从 10/20/30 mm 驱动到 15/25/35 mm，后续 X 改为 17 mm 仍驱动几何。
-装配体 XY 同样通过；Z 在先创建或最后创建时均返回空，原有 Z 间距仍 30 mm，
-工具返回失败，未以其他轴或线长替代。装配体 Z、零/负向组合、更多点/约束组合、
-已有尺寸修改的通用几何读回、恢复失败和旧版软件仍待补齐或专项验证。
-完整安装回归发现含 3D 圆/椭圆转换的零件中，后续 X 尺寸创建返回空且没有新增尺寸。
-独立共点草图和扫描曲面不触发该问题；两种点选择路径的持久引用均正确，常见属性
-与重进编辑未解决。保留原始失败和分阶段探针；验收同时检查拒绝状态及独立零件的
-XYZ 驱动，不能据独立零件成功声称复杂上下文完成。新工具在调用前另核验实际选择引用。
-本机 swDimensionDrivenState_e 确认 0 未知、1 从动、2 驱动；修正原反置的 driven 标记，
-同时返回原生 driven_state。参考尺寸、未知状态和驱动尺寸不再混为同一个状态。
-
-## Motion 求解、结果与动画
-
-新增 8 个原生 Motion 工具：`list_motion_features`、`add_motion_gravity`、
-`add_motion_motor`、`solve_motion_study`、`get_motion_study_results`、
-`set_motion_study_animation`、`control_motion_study_playback`、
-`export_motion_study_frames`。算例生命周期在新建零件与装配体上实测；运动元素
-（引力与马达）只在装配体文档上有效，零件文档返回带 `document_type="part"` 的
-结构化失败，因为原生 `CreateFeature` 在零件上会抛 COM 服务器错误。测试文档
-结束前关闭。
-
-本批同时修正既有工具：`insert_component` 为加载引用文件而静默打开零件后会把
-活动文档切成该零件，后续装配体工具随即失败；现在插入后恢复装配体为活动文档并
-读回 `active_document`。安装协议改为装配体加插入零件的真实 Motion 流程，并暴露
-两个协议层约束：SaveAs 会改变文档标题，Basic Motion 算例拥有时间轴但动画导出
-不产出文件。215 项离线测试通过。
-
-重力特征按类型库 `swFeatureNameID_e` 值 74 创建，回读原生定义的实际强度 9.81、
-轴向索引 1（Y）和反向标志，并从 `GetMotionFeatures` 确认特征名（本机为“引力”）
-与类型 `AEMGravity`。线性与旋转马达按 77/78 创建，方向引用取自实际选中的装配体
-边，回读速度 25/30、`MotorType` 0/1 与反向标志，特征类型分别为 `AEMLinearMotor`
-与 `AEMRotationalMotor`；`ConstantSpeedMotor` 的官方参数单位是 RPM，工具按原生
-数值原样读回，未换算成 mm/s。
-
-`solve_motion_study` 激活算例后调用原生 `Calculate`，再读取该算例类型对应的结果
-对象：本机 `Calculate` 返回 True、`IsOutOfDate` 为 False，但在重力加两个马达的
-装配体上，0/0.5/1.0 s 采样到的质心位置与速度全部为零，工具按要求返回失败并给出
-该观测，而不是以 True 当作求解成功。`get_motion_study_results` 读取同一结果对象的
-质心位置、线速度/加速度、角速度/加速度与欧拉角，三组时间分别返回三个分量。
-
-动画侧 `CreateByRotateModel` 把时间轴从 0 改为 2.0 s 并回读成功；`CreateByExplode`
-与 `CreateByCollapse` 在无爆炸视图的本机上返回原生 True 但不延长/覆盖时间轴，
-工具因此返回失败并保留原始值。帧序列导出用屏幕渲染器写出 16 个 PNG
-（3,369,810 字节），逐个文件核对非零大小；同一路径的 AVI 导出原生返回 False 且
-没有任何文件，工具返回失败。播放控制读取/设置播放模式并核对 `IsPlaying`，
-loop + play 与 stop 均通过。
-
-本机环境限制已核实并保留为缺口：注册表与本进程模块列表中没有 SOLIDWORKS Motion
-动力学插件（ADAMS 求解器），`GetSupportedStudyTypes` 虽报告掩码 7，但把算例类型
-设为 Motion Analysis 会被静默忽略，Basic Motion 可以切换却得不到任何求解结果；
-AVI 与 JPG 导出、PhotoWorks 渲染器同样被拒绝，只有屏幕渲染器的 BMP/PNG 序列成功。
-`GetProperties(4)` 返回的 COSMOSMotion 属性可读（积分器类型、误差容限、最大迭代
-次数等），但该对象不暴露 `GetFrameRate/SetFrameRate`。
-曲线图与 CSV 读取、求解器/许可可用时的真实动力学核验、图像尺寸与比例参数、
-运动事件回调仍待补齐；载荷本身的残余缺口见下一节。
-
-## Motion 载荷：力、弹簧、阻尼与 3D 接触
-
-新增 4 个原生载荷工具：`add_motion_force`（线性力/力矩）、`add_motion_spring`
-（线性/扭转/线性运动/扭转运动弹簧）、`add_motion_damper`（线性/扭转阻尼）、
-`add_motion_contact`（3D 接触）。特征按类型库 `swFeatureNameID_e` 值 75/76、
-79–82、83/84、85 经 `CreateDefinition` 与 `CreateFeature` 创建，两个端点用同一
-选择集的两个标记（mark 1 与追加的 mark 2）取得，第二选择必须 append，否则会
-替换第一选择。
-
-本批查出一个影响所有运动特征创建的既有缺陷：`CreateFeature` 返回的 dispatch
-对象在本机报告的是**上一个**特征的名称与类型，因此原来的“返回对象是否出现在
-特征清单里”判据可能把旧特征当作新特征。现在创建前后对比 `GetMotionFeatures()`
-找出新增条目，以该条目的原生类型与读回参数判定成功；`add_motion_gravity`、
-`add_motion_motor` 一并改用同一路径。
-
-实机验证在新建双零件装配体的运动算例上进行（日志 `motion-payload-live.log`），
-一次创建 9 个载荷特征并逐个读回：线性力 10 N（`ForceType` 0、`ForceFunctionType`
-常量 0、幅值读回）、力矩 5 N·m 反向（`ForceType` 1）、线性弹簧（常数 1、自由长度
-0.05）、扭转弹簧（常数 2）、线性运动弹簧（3 圈读回 3）、线性阻尼 0.5、扭转阻尼
-0.75、3D 接触（刚度 100000、指数 2、最大阻尼 1000、穿透 0.0001、摩擦 full 读回 1、
-恢复系数 0.3）。特征类型分别为 `AEMLinearForce`、`AEMTorque`、`AEMLinearSpring`
-（79 与 81 共用）、`AEMTorsionalSpring`（80 与 82 共用）、`AEMLinearDamper`、
-`AEMTorsionalDamper`、`AEM3DContact`。
-
-原生约束按事实记录：3D 接触的 `ContactComponents` 只接受
-SAFEARRAY(VT_ARRAY|VT_DISPATCH)，元组赋值被静默忽略，工具固定使用前者；扭转运动
-弹簧（82）忽略线圈直径、圈数与线径（读回 -1），工具对该场景返回失败并保留观测；
-扭转弹簧的 `FreeAngle` 属性在本机类型库存在但读写均抛 `AttributeError`。
-力函数仅验证常量类型，step/harmonic/function/spline 的函数值尚未专项验证。
-零件文档对本批载荷同样返回带 `document_type="part"` 的结构化失败。222 项离线
-测试通过（Motion 载荷 7 项：幅值前置拒绝、新特征识别、弹簧参数作用域、阻尼前置
-拒绝、接触双组件校验、恢复系数范围、接触读写回）。
-
-## 原生 API 清点
+## How a claim is checked
 
 ```powershell
-python tools/build_api_inventory.py --official-modules --output D:/solidworks-mcp/.development/native-api-inventory.json
+python -m unittest discover -s tests -p 'test_*.py'          # 225 offline checks
+python tests/live_p0_regression.py                           # live, per domain
+python tools/verify_install.py --install <dir> --tool-count 192 --scratch
+python tools/build_api_inventory.py --official-modules --output <file>
 ```
 
-脚本读取本机 `sldworks.tlb`、`swconst.tlb` 和明确列出的官方随附模块类型库，
-记录接口、成员签名及特征类型。不实例化插件，不执行清单中的方法；
-读取类型库不能证明许可证可用，也不能证明功能已经实现。实际工具清单通过 MCP `list_tools` 核对。
+Live scripts touch only newly created documents and close them. The type-library
+inventory finds gaps; it is not a coverage ratio, and reading a library proves
+neither a licence nor an implementation. Per-batch measurements stay in the PR
+history.
+
+`main` is protected: pull requests with the four `offline` CI jobs, no direct
+pushes, owner-merged. See [CONTRIBUTING.md](CONTRIBUTING.md).

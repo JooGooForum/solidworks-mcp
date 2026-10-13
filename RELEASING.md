@@ -5,6 +5,32 @@ publishes in order: the package to PyPI first, then the registry entry that
 points at it. The registry validates the PyPI package before accepting the
 entry, so the order is not optional.
 
+## Read this first: the package name on PyPI
+
+`solidworks-mcp` on PyPI belongs to a **different project**
+(`hjbaard/SolidWorks-MCP`, 0.16.0), so this repository publishes as
+**`solidworks-mcp-server`**:
+
+| Where | Value |
+| --- | --- |
+| `pyproject.toml` → `project.name` | `solidworks-mcp-server` |
+| `server.json` → `packages[0].identifier` | `solidworks-mcp-server` |
+| `pyproject.toml` → `project.scripts` | `solidworks-mcp` (the command that gets installed) |
+| `server.json` → `name` | `io.github.Slacker-LLC/solidworks-mcp` |
+
+Uploading under the old name either fails on a name conflict or — if it ever
+succeeded — would publish metadata pointing at somebody else's package. Check
+the name is still free before the first release; a 404 means free:
+
+```powershell
+curl "https://pypi.org/pypi/solidworks-mcp-server/json"
+```
+
+The GitHub repository and account were renamed from `limuzi013` to
+`Slacker-LLC`. Git and the web UI follow the redirects, but PyPI and the MCP
+Registry match on the current names, so anything that hard-codes `limuzi013` is
+stale.
+
 ## The short version: push a tag
 
 `.github/workflows/publish-mcp.yml` does the whole sequence on a `v*` tag —
@@ -14,7 +40,7 @@ the repository.
 
 **One-time setup on PyPI, before the first tag.** Under the project's
 Publishing settings add a *pending publisher* for GitHub with owner
-`limuzi013`, repository `solidworks-mcp`, and workflow `publish-mcp.yml`.
+`Slacker-LLC`, repository `solidworks-mcp`, and workflow `publish-mcp.yml`.
 Without it the PyPI step fails to authenticate.
 
 ```bash
@@ -44,11 +70,15 @@ The registry verifies ownership of a PyPI package by looking for an
 `README.md` carries it as a comment:
 
 ```markdown
-<!-- mcp-name: io.github.limuzi013/solidworks-mcp -->
+<!-- mcp-name: io.github.Slacker-LLC/solidworks-mcp -->
 ```
 
-The name after `mcp-name:` **must** match `name` in `server.json`. Deleting that
-line is what "Registry validation failed for package" usually means.
+The name after `mcp-name:` **must** match `name` in `server.json`, and the
+namespace **must** match the publishing account. GitHub OIDC grants
+`io.github.<repository owner>/*` using the owner's exact case, so this has to
+read `Slacker-LLC` — a lowercased variant fails the permission check. Deleting
+the line altogether is what "Registry validation failed for package" usually
+means.
 
 ## 3. Run the tests and build
 
@@ -59,6 +89,9 @@ line is what "Registry validation failed for package" usually means.
 ```powershell
 .\.venv\Scripts\python.exe -m pip install build && .\.venv\Scripts\python.exe -m build
 ```
+
+The wheel is named `solidworks_mcp_server-<version>-py3-none-any.whl` (PyPI
+normalises `_` and `-`), and it still installs the `solidworks-mcp` command.
 
 ## 4. Publish to PyPI
 
@@ -84,7 +117,7 @@ $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitec
 
 Authenticate and publish. GitHub authentication is a device-code flow, and the
 namespace it grants is `io.github.<your-username>/`, which is why the server is
-named `io.github.limuzi013/solidworks-mcp`:
+named `io.github.Slacker-LLC/solidworks-mcp`:
 
 ```powershell
 .\mcp-publisher.exe login github
@@ -97,21 +130,21 @@ named `io.github.limuzi013/solidworks-mcp`:
 Verify:
 
 ```powershell
-curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.limuzi013/solidworks-mcp"
+curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.Slacker-LLC/solidworks-mcp"
 ```
 
 ## 6. Point the README at PyPI
 
-Until the package is on PyPI, `uvx solidworks-mcp` does not resolve, so the
-README documents installing from a checkout instead. Once the first release is
-live, add the shorter form:
+Until the package is on PyPI, `uvx solidworks-mcp-server` does not resolve, so
+the README documents installing from a checkout instead. Once the first release
+is live, add the shorter form:
 
 ```json
 {
   "mcpServers": {
     "solidworks-mcp": {
       "command": "uvx",
-      "args": ["solidworks-mcp"]
+      "args": ["solidworks-mcp-server"]
     }
   }
 }

@@ -18,6 +18,18 @@ body:
       required: true
 
   - type: input
+    id: install-source
+    attributes:
+      label: Install source and server version
+      description: >
+        Where this copy came from (git checkout with its commit, wheel path,
+        installed package) and the version from
+        python -c "import solidworks_mcp; print(solidworks_mcp.__version__)".
+      placeholder: "git checkout ff50276 / wheel 0.1.0 — solidworks_mcp 0.1.0"
+    validations:
+      required: true
+
+  - type: input
     id: python-version
     attributes:
       label: Python version

@@ -2,9 +2,13 @@
 
 ## What the tests can and cannot tell you
 
-`tests/test_sw_core.py` runs anywhere: it covers the parts that are plain Python
-— the method-flagging control flow, unit conversion, the assembly transform
-maths. CI runs it on Windows across Python 3.10–3.13.
+The offline suite — `python -m unittest discover -s tests -p 'test_*.py'`, 225
+checks — runs anywhere: unit conversion, selection marks, geometry helpers, the
+tool contracts of every module, and the import guardrails (every module imports
+as part of the package, no absolute same-level imports, the five tools reported
+in issue #3 are still registered). CI runs it on Windows across Python 3.10–3.13
+and imports `solidworks_mcp.server` as its own step, because the unit tests only
+reach `sw_core` and stayed green while a broken entry point shipped once.
 
 It cannot tell you that SOLIDWORKS accepts a call. The COM behaviour that
 matters here does not mock faithfully, so anything touching geometry has to be
@@ -58,6 +62,38 @@ silently lies to a model:
 - **Never open a modal dialog.** One modal box blocks the COM call that opened
   it and deadlocks the whole server.
 
+## Traps that cost real time
+
+**SOLIDWORKS members are inconsistently exposed to pywin32.** Most are declared
+as `PROPGET` *with arguments*, and late-bound pywin32 may resolve such a member
+on plain attribute access by calling it with **no** arguments: `IBody2.GetFaces`
+then returns a bound method that looks like a one-element result, and calling
+`ModelDocExtension.AddDimension` that way **crashes SOLIDWORKS outright**.
+`sw_core.flag_methods()` calls `_FlagAsMethod` on every member the server invokes
+with arguments, and `sw_core.value()` invokes zero-argument callables instead of
+returning the method object.
+
+**Modal dialogs deadlock the server.** `AddDimension2` pops the "Modify" box
+whenever *Input dimension value* is enabled — the default — and a modal dialog
+blocks the COM call that opened it, and with it the whole server, until somebody
+clicks. Dimension tools turn the preference off and restore it afterwards. If a
+tool hangs, look for a dialog behind the SOLIDWORKS window.
+
+**Return values lie.** `SketchTrim` returns `False` on success, the `Create*`
+sketch APIs return arrays whose truthiness is unreliable, and
+`SketchAddConstraints` silently ignores a string it does not recognise. Judge by
+the model: segment counts, `GetWhatsWrong`, relation counts.
+
+**Multi-reference features want distinct marks.** `InsertRefPlane` reads its
+first, second and third reference from *marks 0, 1 and 2*, not from selection
+order; selecting everything with mark 0 silently builds nothing, which is why
+`create_plane` gives each reference its own mark.
+
+**Two unit traps.** `IPartDoc.GetPartBox(False)` returns *document* units, so it
+reads 1000x large if you treat it like the rest of the API; pass `True`. And
+`swSketchLINE` is `0`, so folding a segment type through `or` turns every line
+into "unknown".
+
 ## Why `mcp` is capped below 2.0
 
 `mcp` 2.0 removed the low-level `Server.list_tools()` / `Server.call_tool()`
@@ -78,6 +114,15 @@ documented API. It does not launch SOLIDWORKS, register an add-in, execute
 arbitrary code, or touch the network, and a pull request that adds any of those
 will not be merged — a `run_macro`-shaped tool would hand an MCP client
 arbitrary code execution inside the user's CAD session.
+
+## Language
+
+English is the primary language of the repository: documentation, code
+comments, commit messages and pull requests. Simplified Chinese is the
+secondary language — `README.zh-CN.md` and `COVERAGE.zh-CN.md` mirror their
+English counterparts and are expected to move together in the same pull
+request. Code, identifiers, command lines and error text stay in their original
+form in both.
 
 ## Branch protection, and who merges
 
