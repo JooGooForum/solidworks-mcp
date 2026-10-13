@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "solidworks-mcp"
+name = "solidworks-mcp-server"
 version = "0.1.0"
 description = "MCP server that drives a running SOLIDWORKS session over its COM API"
 readme = "README.md"
@@ -37,8 +37,8 @@ dependencies = [
 solidworks-mcp = "solidworks_mcp.server:run"
 
 [project.urls]
-Homepage = "https://github.com/limuzi013/solidworks-mcp"
-Issues = "https://github.com/limuzi013/solidworks-mcp/issues"
+Homepage = "https://github.com/Slacker-LLC/solidworks-mcp"
+Issues = "https://github.com/Slacker-LLC/solidworks-mcp/issues"
 
 [tool.setuptools]
 packages = ["solidworks_mcp"]
