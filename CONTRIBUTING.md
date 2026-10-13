@@ -78,3 +78,26 @@ documented API. It does not launch SOLIDWORKS, register an add-in, execute
 arbitrary code, or touch the network, and a pull request that adds any of those
 will not be merged — a `run_macro`-shaped tool would hand an MCP client
 arbitrary code execution inside the user's CAD session.
+
+## Branch protection, and who merges
+
+`main` is protected:
+
+- every change goes through a pull request, and the four `offline` CI jobs
+  (Windows, Python 3.10–3.13) are required status checks;
+- force pushes and branch deletion are blocked, and the rules apply to
+  administrators too;
+- all conversations have to be resolved before the merge button unlocks.
+
+Automation — an agent, a bot, a script — may create the branch, push it and open
+the pull request, but **the repository owner merges it**. That means automation
+never merges, never pushes to `main`, and never edits or disables the protection.
+See `AGENTS.md` for the same rule stated as instructions to an agent.
+
+One caveat is worth knowing. `required_approving_review_count` is currently `0`
+because the repository has a single account, and GitHub will not let an author
+approve their own pull request — requiring an approval today would deadlock every
+merge. To make "only the owner merges" a technical gate instead of a convention,
+add a second account as a collaborator (or run automation under its own account)
+and then raise the count to `1`. The required checks, the ban on force pushes and
+the admin enforcement already apply either way.
