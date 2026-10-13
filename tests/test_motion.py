@@ -294,5 +294,144 @@ class MotionExportTests(unittest.TestCase):
         self.assertEqual([path.name for path in files], ["anim-0000.png", "anim-0001.png"])
 
 
+class FakeForceDefinition:
+    def __init__(self):
+        self.FunctionConstantValue = 0.0
+        self.ForceFunctionType = 0
+        self.ForceType = 0
+        self.ActionType = 0
+        self.ReverseDirection = False
+        self.endpoints = None
+
+    def SetEndPoints(self, one, two):
+        self.endpoints = (one, two)
+
+    def _FlagAsMethod(self, name):
+        return None
+
+
+class FakeContactDefinition:
+    def __init__(self):
+        self.ContactComponents = None
+        self.FrictionOption = 1
+        self.UseRestitutionCoefficient = False
+        self.RestitutionCoefficient = 0.5
+        self.Stiffness = 0.0
+        self.Exponent = 1.0
+        self.MaxDamping = 0.0
+        self.Penetration = 0.0
+
+
+class FakePayloadStudy:
+    """CreateFeature returns a stale dispatch object, as the live build does."""
+
+    def __init__(self, kind, definition):
+        self.kind = kind
+        self.definition = definition
+        self.features = []
+
+    def CreateDefinition(self, code):
+        return self.definition
+
+    def CreateFeature(self, definition):
+        self.features.append(SimpleNamespace(Name=f"Feature{len(self.features) + 1}", GetTypeName2=lambda: self.kind))
+        return SimpleNamespace(Name="Feature1", GetTypeName2=lambda: "AEMStaleType")
+
+    def GetMotionFeatures(self):
+        return list(self.features)
+
+    def GetMotionFeaturesCount(self):
+        return len(self.features)
+
+
+class MotionPayloadTests(unittest.TestCase):
+    @staticmethod
+    def fake_document(count=2):
+        references = [object() for _ in range(count)]
+        selection = SimpleNamespace(GetSelectedObject6=lambda mark, index: references[mark - 1],
+                                    _FlagAsMethod=lambda name: None)
+        return SimpleNamespace(SelectionManager=selection), references
+
+    def test_force_rejects_invalid_magnitude_before_com(self):
+        for magnitude in (0, float("nan"), float("inf")):
+            with self.subTest(magnitude=magnitude), patch.object(sw_motion, "_manager") as manager:
+                with self.assertRaises(RuntimeError):
+                    sw_motion.add_motion_force({"name": "Solve", "magnitude": magnitude,
+                                                "references": [{}, {}]})
+                manager.assert_not_called()
+
+    def test_force_identifies_the_new_feature_not_the_returned_dispatch_object(self):
+        definition = FakeForceDefinition()
+        study = FakePayloadStudy("AEMLinearForce", definition)
+        study.features.append(SimpleNamespace(Name="OldFeature", GetTypeName2=lambda: "AEMOldType"))
+        doc, references = self.fake_document()
+        with patch.object(sw_motion, "_manager"), patch.object(sw_motion, "_study", return_value=study), \
+                patch.object(sw_motion, "_activate", return_value=True), \
+                patch.object(sw_motion, "active_document", return_value=(None, doc)), \
+                patch.object(sw_motion, "require_selection", return_value=1):
+            payload = sw_motion.add_motion_force({"name": "Solve", "magnitude": 12.0,
+                                                  "references": [{"faces": [0]}, {"faces": [1]}]})
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["data"]["feature"], {"name": "Feature2", "type": "AEMLinearForce"})
+        self.assertEqual(definition.endpoints, tuple(references))
+        self.assertEqual(definition.FunctionConstantValue, 12.0)
+        self.assertEqual(definition.ForceFunctionType, 0)
+
+    def test_spring_parameter_scope_is_checked_before_com(self):
+        cases = (
+            ({"spring_constant": 1.0, "spring_type": "linear", "coil_diameter": 0.01}, "coil geometry"),
+            ({"spring_constant": 1.0, "spring_type": "linear_motion", "free_length": 0.05}, "free length"),
+            ({"spring_constant": 0.0}, "spring constant"),
+            ({"spring_constant": 1.0, "number_of_coils": 0}, "coil count"),
+        )
+        for extra, label in cases:
+            arguments = {"name": "Solve", "references": [{}, {}]}
+            arguments.update(extra)
+            with self.subTest(label=label), patch.object(sw_motion, "_manager") as manager:
+                with self.assertRaises(RuntimeError):
+                    sw_motion.add_motion_spring(arguments)
+                manager.assert_not_called()
+
+    def test_damper_rejects_invalid_constant_before_com(self):
+        for constant in (0, -1, float("nan"), float("inf")):
+            with self.subTest(constant=constant), patch.object(sw_motion, "_manager") as manager:
+                with self.assertRaises(RuntimeError):
+                    sw_motion.add_motion_damper({"name": "Solve", "damping_constant": constant,
+                                                 "references": [{}, {}]})
+                manager.assert_not_called()
+
+    def test_contact_requires_two_distinct_components(self):
+        for names in (["A"], ["A", "A"], ["A", "B", "C"]):
+            with self.subTest(names=names), patch.object(sw_motion, "_manager") as manager:
+                with self.assertRaises(RuntimeError):
+                    sw_motion.add_motion_contact({"name": "Solve", "components": names})
+                manager.assert_not_called()
+
+    def test_contact_rejects_an_out_of_range_restitution_before_com(self):
+        with patch.object(sw_motion, "_manager") as manager:
+            with self.assertRaises(RuntimeError):
+                sw_motion.add_motion_contact({"name": "Solve", "components": ["A", "B"], "restitution": 1.5})
+            manager.assert_not_called()
+
+    def test_contact_writes_both_components_and_reads_the_parameters_back(self):
+        definition = FakeContactDefinition()
+        study = FakePayloadStudy("AEM3DContact", definition)
+        components = [SimpleNamespace(Name2="left-1"), SimpleNamespace(Name2="right-1")]
+        with patch.object(sw_motion, "_manager"), patch.object(sw_motion, "_study", return_value=study), \
+                patch.object(sw_motion, "_activate", return_value=True), \
+                patch.object(sw_motion, "active_document", return_value=(None, SimpleNamespace())), \
+                patch.object(sw_motion, "_component", side_effect=components), \
+                patch.object(sw_motion, "_dispatch_array", return_value="PAIR") as array:
+            payload = sw_motion.add_motion_contact({"name": "Solve", "components": ["left-1", "right-1"],
+                                                    "stiffness": 100000.0, "friction_option": "dynamic",
+                                                    "use_restitution": True, "restitution": 0.25})
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(definition.ContactComponents, "PAIR")
+        self.assertEqual(definition.FrictionOption, 2)
+        self.assertTrue(definition.UseRestitutionCoefficient)
+        self.assertEqual(payload["data"]["feature"]["type"], "AEM3DContact")
+        array.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

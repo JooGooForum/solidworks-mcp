@@ -18,6 +18,9 @@ import math
 import time
 from pathlib import Path
 
+import pythoncom
+import win32com.client
+
 from .sw_core import (
     active_document, as_list, byref_long, document_type, extension, flag_methods,
     iter_components, require_selection, result, safe, to_deg, tool, value,
@@ -27,6 +30,22 @@ from .sw_file import validated_output_path
 TYPES = {"animation": 1, "basic_motion": 2, "motion_analysis": 4}
 SIMULATION_TYPES = (2, 4)
 MOTOR_TYPES = {"linear": 77, "rotational": 78}
+# swFeatureNameID_e: 75 linear force, 76 torque, 79-82 springs, 83-84 dampers, 85 3D contact.
+FORCE_TYPES = {"linear": 75, "torque": 76}
+SPRING_TYPES = {"linear": 79, "torsional": 80, "linear_motion": 81, "torsional_motion": 82}
+DAMPER_TYPES = {"linear": 83, "torsional": 84}
+CONTACT_TYPE = 85
+# swSimulationForceFunctionType_e
+FORCE_FUNCTIONS = {"constant": 0, "step": 1, "harmonic": 2, "function": 3, "spline": 4}
+# swMotionContactFrictionType_e
+FRICTION_OPTIONS = {"off": 0, "full": 1, "dynamic": 2}
+# Creation reads these back from the study's own feature list: the motion springs are
+# stored as the plain spring type of the same direction, which is why 81/82 map to
+# the linear/torsional feature type instead of a separate coil-spring feature.
+FORCE_FEATURE_TYPES = {"linear": "AEMLinearForce", "torque": "AEMTorque"}
+SPRING_FEATURE_TYPES = {"linear": "AEMLinearSpring", "torsional": "AEMTorsionalSpring",
+                        "linear_motion": "AEMLinearSpring", "torsional_motion": "AEMTorsionalSpring"}
+DAMPER_FEATURE_TYPES = {"linear": "AEMLinearDamper", "torsional": "AEMTorsionalDamper"}
 GRAVITY_AXES = {"x": 0, "y": 1, "z": 2}
 PART_DOCUMENT = 1
 ASSEMBLY_DOCUMENT = 2
@@ -37,6 +56,8 @@ FRAME_FORMATS = {"avi": 1, "bmp": 2, "tga": 3, "png": 4, "jpg": 5, "tif": 6,
                  "mp4": 7, "mkv": 8, "flv": 9, "lxo": 10}
 NAME = {"type": "string", "minLength": 1}
 TYPE = {"type": "string", "enum": list(TYPES), "default": "animation"}
+TWO_REFERENCES = {"type": "array", "minItems": 2, "maxItems": 2,
+                   "items": {"type": "object", "description": "Selection specification for one end point."}}
 
 # Members called with arguments.  Properties are deliberately absent: flagging a
 # property as a method makes its put unresolvable.
@@ -163,6 +184,46 @@ def _component(doc, name=None):
                 return component
         raise RuntimeError(f"No top-level component named '{name}'.")
     return components[0] if components else None
+
+
+def _two_references(doc, references):
+    """Select both end points of a motion element in a single selection set."""
+    if not isinstance(references, (list, tuple)) or len(references) != 2:
+        raise RuntimeError("Provide exactly two reference selections for the two end points.")
+    objects = []
+    for index, spec in enumerate(references, start=1):
+        count = require_selection(doc, spec, mark=index, append=index > 1)
+        if count != 1:
+            raise RuntimeError(f"End point {index} must select exactly one object, not {count}.")
+        selection = flag_methods(doc.SelectionManager, "GetSelectedObject6")
+        reference = selection.GetSelectedObject6(index, -1)
+        if reference is None:
+            raise RuntimeError(f"End point {index} resolved to nothing after selection.")
+        objects.append(reference)
+    return objects
+
+
+def _create_feature(study, definition):
+    """Create a motion feature and identify it by the study's own feature list.
+
+    The dispatch object CreateFeature returns can still report the previous
+    feature's name and type on this build, so the new entry is found by diffing
+    GetMotionFeatures instead of trusting the returned object.
+    """
+    before = [entry["name"] for entry in _features(study)]
+    feature = study.CreateFeature(definition)
+    if feature is None:
+        return None, None
+    for entry in reversed(_features(study)):
+        if entry["name"] not in before:
+            return feature, entry
+    return feature, {"name": str(safe(feature, "Name", "")), "type": str(safe(feature, "GetTypeName2", ""))}
+
+
+def _dispatch_array(objects):
+    """A SAFEARRAY of dispatch pointers; the contact data object requires one."""
+    return win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH,
+                                   tuple(entry._oleobj_ for entry in objects))
 
 
 def _sample(results, component, times):
@@ -381,14 +442,13 @@ def add_motion_gravity(args):
     definition.Strength = strength
     definition.ReverseDirection = reverse
     definition.Axis = axis
-    feature = study.CreateFeature(definition)
+    feature, created = _create_feature(study, definition)
     if feature is None:
         return result(False, "SOLIDWORKS refused the gravity feature.")
-    created = {"name": str(safe(feature, "Name", "")), "type": str(safe(feature, "GetTypeName2", ""))}
     stored = {"strength": float(value(definition, "Strength")), "reverse_direction": bool(value(definition, "ReverseDirection")),
               "axis": int(value(definition, "Axis"))}
     features = _features(study)
-    confirmed = (any(entry["name"] == created["name"] for entry in features)
+    confirmed = (created["type"] == "AEMGravity"
                  and math.isclose(stored["strength"], strength, rel_tol=1e-9)
                  and stored["reverse_direction"] == reverse and stored["axis"] == axis)
     return result(confirmed, "Read the created gravity feature back.", feature=created, definition=stored,
@@ -429,19 +489,241 @@ def add_motion_motor(args):
     definition.ConstantSpeedMotor(speed)
     stored = {"speed": float(value(definition, "Velocity")), "reverse_direction": bool(value(definition, "ReverseDirection")),
               "motor_type": int(value(definition, "MotorType"))}
-    feature = study.CreateFeature(definition)
+    feature, created = _create_feature(study, definition)
     if feature is None:
         return result(False, "SOLIDWORKS refused the motor feature.", definition=stored)
-    created = {"name": str(safe(feature, "Name", "")), "type": str(safe(feature, "GetTypeName2", ""))}
     features = _features(study)
     stored = {"speed": float(value(definition, "Velocity")), "reverse_direction": bool(value(definition, "ReverseDirection")),
               "motor_type": int(value(definition, "MotorType"))}
-    confirmed = (any(entry["name"] == created["name"] for entry in features)
+    confirmed = (created["type"] == ("AEMLinearMotor" if motor_type == "linear" else "AEMRotationalMotor")
                  and math.isclose(stored["speed"], speed, rel_tol=1e-9)
                  and stored["reverse_direction"] == reverse
                  and stored["motor_type"] == (0 if motor_type == "linear" else 1))
     return result(confirmed, "Read the created motor feature back.", feature=created, definition=stored,
                   features=features, count=int(value(study, "GetMotionFeaturesCount")))
+
+
+@tool("add_motion_force", "Create a constant native linear force or torque between two selected references and read the stored function back.",
+      {"name": NAME, "force_type": {"type": "string", "enum": list(FORCE_TYPES), "default": "linear"},
+       "magnitude": {"type": "number", "description": "Constant value in the document force unit (N or N m for torque)."},
+       "reverse_direction": {"type": "boolean", "default": False},
+       "references": TWO_REFERENCES}, ["name", "magnitude", "references"])
+def add_motion_force(args):
+    magnitude = float(args["magnitude"])
+    if not math.isfinite(magnitude) or magnitude == 0:
+        raise RuntimeError("Force magnitude must be a finite non-zero number.")
+    force_type = str(args.get("force_type", "linear"))
+    if force_type not in FORCE_TYPES:
+        raise RuntimeError(f"Unknown force type '{force_type}'.")
+    reverse = bool(args.get("reverse_direction", False))
+    try:
+        manager = _manager(require_elements=True)
+    except MotionElementsUnsupported as exc:
+        return result(False, str(exc), document_type=exc.label)
+    study = _study(manager, _name(args["name"]))
+    if not _activate(manager, study):
+        return result(False, "Could not activate the study before adding the force.", study=_info(study))
+    _, doc = active_document()
+    references = _two_references(doc, args["references"])
+    definition = flag_methods(study.CreateDefinition(FORCE_TYPES[force_type]), "SetEndPoints", "GetEndPoints")
+    if definition is None:
+        return result(False, "SOLIDWORKS returned no force feature data object.")
+    definition.SetEndPoints(*references)
+    definition.ForceFunctionType = FORCE_FUNCTIONS["constant"]
+    definition.FunctionConstantValue = magnitude
+    definition.ReverseDirection = reverse
+    stored = {"magnitude": float(value(definition, "FunctionConstantValue")),
+              "function_type": int(value(definition, "ForceFunctionType")),
+              "force_type": int(value(definition, "ForceType")),
+              "action_type": int(value(definition, "ActionType")),
+              "reverse_direction": bool(value(definition, "ReverseDirection"))}
+    feature, created = _create_feature(study, definition)
+    if feature is None:
+        return result(False, "SOLIDWORKS refused the force feature.", definition=stored)
+    confirmed = (created["type"] == FORCE_FEATURE_TYPES[force_type]
+                 and math.isclose(stored["magnitude"], magnitude, rel_tol=1e-9)
+                 and stored["force_type"] == (0 if force_type == "linear" else 1)
+                 and stored["reverse_direction"] == reverse)
+    return result(confirmed, "Read the created force feature back.", feature=created, definition=stored,
+                  features=_features(study), count=int(value(study, "GetMotionFeaturesCount")))
+
+
+@tool("add_motion_spring", "Create a native linear, torsional or coil motion spring between two selected references and read the stored characteristics back.",
+      {"name": NAME, "spring_type": {"type": "string", "enum": list(SPRING_TYPES), "default": "linear"},
+       "spring_constant": {"type": "number", "exclusiveMinimum": 0},
+       "free_length": {"type": "number", "exclusiveMinimum": 0, "description": "Linear springs only."},
+       "coil_diameter": {"type": "number", "exclusiveMinimum": 0, "description": "Coil motion springs only."},
+       "number_of_coils": {"type": "integer", "minimum": 1, "description": "Coil motion springs only."},
+       "wire_diameter": {"type": "number", "exclusiveMinimum": 0, "description": "Coil motion springs only."},
+       "references": TWO_REFERENCES}, ["name", "spring_constant", "references"])
+def add_motion_spring(args):
+    constant = float(args["spring_constant"])
+    if not math.isfinite(constant) or constant <= 0:
+        raise RuntimeError("Spring constant must be a finite positive number.")
+    spring_type = str(args.get("spring_type", "linear"))
+    if spring_type not in SPRING_TYPES:
+        raise RuntimeError(f"Unknown spring type '{spring_type}'.")
+    for key in ("free_length", "coil_diameter", "wire_diameter"):
+        if key in args and (not math.isfinite(float(args[key])) or float(args[key]) <= 0):
+            raise RuntimeError(f"{key} must be a finite positive number.")
+    if "number_of_coils" in args and int(args["number_of_coils"]) < 1:
+        raise RuntimeError("number_of_coils must be at least one.")
+    coil_spring = spring_type in ("linear_motion", "torsional_motion")
+    if "free_length" in args and coil_spring:
+        raise RuntimeError("free_length applies to the linear and torsional spring types, not to the coil motion springs.")
+    if not coil_spring and any(key in args for key in ("coil_diameter", "number_of_coils", "wire_diameter")):
+        raise RuntimeError("Coil diameter, coil count and wire diameter apply only to the coil motion springs.")
+    try:
+        manager = _manager(require_elements=True)
+    except MotionElementsUnsupported as exc:
+        return result(False, str(exc), document_type=exc.label)
+    study = _study(manager, _name(args["name"]))
+    if not _activate(manager, study):
+        return result(False, "Could not activate the study before adding the spring.", study=_info(study))
+    _, doc = active_document()
+    references = _two_references(doc, args["references"])
+    definition = flag_methods(study.CreateDefinition(SPRING_TYPES[spring_type]), "SetEndPoints", "GetEndPoints")
+    if definition is None:
+        return result(False, "SOLIDWORKS returned no spring feature data object.")
+    definition.SetEndPoints(*references)
+    definition.SpringConstant = constant
+    requested = {"spring_constant": constant}
+    stored = {"spring_constant": float(value(definition, "SpringConstant"))}
+    if "free_length" in args:
+        definition.FreeLength = float(args["free_length"])
+        requested["free_length"] = float(args["free_length"])
+        stored["free_length"] = float(value(definition, "FreeLength"))
+    for key, attributename in (("coil_diameter", "CoilDiameter"), ("number_of_coils", "NumberOfCoils"),
+                               ("wire_diameter", "WireDiameter")):
+        if key not in args:
+            continue
+        setattr(definition, attributename, args[key])
+        requested[key] = args[key]
+        stored[key] = value(definition, attributename)
+    feature, created = _create_feature(study, definition)
+    if feature is None:
+        return result(False, "SOLIDWORKS refused the spring feature.", definition=stored)
+    confirmed = created["type"] == SPRING_FEATURE_TYPES[spring_type]
+    for key, wanted in requested.items():
+        actual = stored.get(key)
+        if key == "number_of_coils":
+            confirmed = confirmed and int(actual) == int(wanted)
+        else:
+            confirmed = confirmed and math.isclose(float(actual), float(wanted), rel_tol=1e-9)
+    return result(confirmed, "Read the created spring feature back.", feature=created, definition=stored,
+                  requested=requested, features=_features(study), count=int(value(study, "GetMotionFeaturesCount")))
+
+
+@tool("add_motion_damper", "Create a native linear or torsional damper between two selected references and read the stored damping constant back.",
+      {"name": NAME, "damper_type": {"type": "string", "enum": list(DAMPER_TYPES), "default": "linear"},
+       "damping_constant": {"type": "number", "exclusiveMinimum": 0},
+       "references": TWO_REFERENCES}, ["name", "damping_constant", "references"])
+def add_motion_damper(args):
+    constant = float(args["damping_constant"])
+    if not math.isfinite(constant) or constant <= 0:
+        raise RuntimeError("Damping constant must be a finite positive number.")
+    damper_type = str(args.get("damper_type", "linear"))
+    if damper_type not in DAMPER_TYPES:
+        raise RuntimeError(f"Unknown damper type '{damper_type}'.")
+    try:
+        manager = _manager(require_elements=True)
+    except MotionElementsUnsupported as exc:
+        return result(False, str(exc), document_type=exc.label)
+    study = _study(manager, _name(args["name"]))
+    if not _activate(manager, study):
+        return result(False, "Could not activate the study before adding the damper.", study=_info(study))
+    _, doc = active_document()
+    references = _two_references(doc, args["references"])
+    definition = flag_methods(study.CreateDefinition(DAMPER_TYPES[damper_type]), "SetEndPoints", "GetEndPoints")
+    if definition is None:
+        return result(False, "SOLIDWORKS returned no damper feature data object.")
+    definition.SetEndPoints(*references)
+    definition.DampingConstant = constant
+    stored = {"damping_constant": float(value(definition, "DampingConstant")),
+              "type": int(value(definition, "Type"))}
+    feature, created = _create_feature(study, definition)
+    if feature is None:
+        return result(False, "SOLIDWORKS refused the damper feature.", definition=stored)
+    confirmed = (created["type"] == DAMPER_FEATURE_TYPES[damper_type]
+                 and math.isclose(stored["damping_constant"], constant, rel_tol=1e-9))
+    return result(confirmed, "Read the created damper feature back.", feature=created, definition=stored,
+                  features=_features(study), count=int(value(study, "GetMotionFeaturesCount")))
+
+
+@tool("add_motion_contact", "Create a native 3D contact feature between two components and read the contact parameters back.",
+      {"name": NAME,
+       "components": {"type": "array", "minItems": 2, "maxItems": 2,
+                      "items": {"type": "string", "minLength": 1},
+                      "description": "Two distinct top-level component names."},
+       "stiffness": {"type": "number", "exclusiveMinimum": 0},
+       "exponent": {"type": "number", "exclusiveMinimum": 0},
+       "max_damping": {"type": "number", "minimum": 0},
+       "penetration": {"type": "number", "exclusiveMinimum": 0},
+       "friction_option": {"type": "string", "enum": list(FRICTION_OPTIONS), "default": "full"},
+       "use_restitution": {"type": "boolean", "default": False},
+       "restitution": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5}},
+      ["name", "components"])
+def add_motion_contact(args):
+    names = [str(entry) for entry in args["components"]]
+    if len(names) != 2 or len(set(names)) != 2:
+        raise RuntimeError("Provide two distinct component names for the contact pair.")
+    friction = str(args.get("friction_option", "full"))
+    if friction not in FRICTION_OPTIONS:
+        raise RuntimeError(f"Unknown friction option '{friction}'.")
+    for key in ("stiffness", "exponent", "penetration"):
+        if key in args and (not math.isfinite(float(args[key])) or float(args[key]) <= 0):
+            raise RuntimeError(f"{key} must be a finite positive number.")
+    if "max_damping" in args and (not math.isfinite(float(args["max_damping"])) or float(args["max_damping"]) < 0):
+        raise RuntimeError("max_damping must be a finite non-negative number.")
+    restitution = float(args.get("restitution", 0.5))
+    if not math.isfinite(restitution) or not 0 <= restitution <= 1:
+        raise RuntimeError("restitution must be between 0 and 1.")
+    use_restitution = bool(args.get("use_restitution", False))
+    try:
+        manager = _manager(require_elements=True)
+    except MotionElementsUnsupported as exc:
+        return result(False, str(exc), document_type=exc.label)
+    study = _study(manager, _name(args["name"]))
+    if not _activate(manager, study):
+        return result(False, "Could not activate the study before adding the contact.", study=_info(study))
+    _, doc = active_document()
+    try:
+        components = [_component(doc, name) for name in names]
+    except RuntimeError as exc:
+        return result(False, str(exc), components=names)
+    definition = study.CreateDefinition(CONTACT_TYPE)
+    if definition is None:
+        return result(False, "SOLIDWORKS returned no 3D contact feature data object.")
+    definition.ContactComponents = _dispatch_array(components)
+    definition.FrictionOption = FRICTION_OPTIONS[friction]
+    definition.UseRestitutionCoefficient = use_restitution
+    definition.RestitutionCoefficient = restitution
+    requested = {"friction_option": FRICTION_OPTIONS[friction], "use_restitution": use_restitution,
+                 "restitution": restitution}
+    for key, attributename in (("stiffness", "Stiffness"), ("exponent", "Exponent"),
+                               ("max_damping", "MaxDamping"), ("penetration", "Penetration")):
+        if key in args:
+            setattr(definition, attributename, float(args[key]))
+            requested[key] = float(args[key])
+    stored = {"stiffness": float(value(definition, "Stiffness")), "exponent": float(value(definition, "Exponent")),
+              "max_damping": float(value(definition, "MaxDamping")),
+              "penetration": float(value(definition, "Penetration")),
+              "friction_option": int(value(definition, "FrictionOption")),
+              "use_restitution": bool(value(definition, "UseRestitutionCoefficient")),
+              "restitution": float(value(definition, "RestitutionCoefficient"))}
+    feature, created = _create_feature(study, definition)
+    if feature is None:
+        return result(False, "SOLIDWORKS refused the 3D contact feature.", definition=stored, components=names)
+    confirmed = created["type"] == "AEM3DContact"
+    for key, wanted in requested.items():
+        actual = stored[key]
+        if key in ("friction_option", "use_restitution"):
+            confirmed = confirmed and actual == wanted
+        else:
+            confirmed = confirmed and math.isclose(float(actual), float(wanted), rel_tol=1e-9)
+    return result(confirmed, "Read the created 3D contact feature back.", feature=created, definition=stored,
+                  requested=requested, components=names, features=_features(study),
+                  count=int(value(study, "GetMotionFeaturesCount")))
 
 
 @tool("solve_motion_study", "Activate a motion study, run the native Calculate, then read the results object back: out-of-date flag plus sampled kinematics of a component.",

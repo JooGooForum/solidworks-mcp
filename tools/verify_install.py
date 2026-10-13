@@ -404,6 +404,36 @@ async def protocol(install, expected, catalog, scratch):
                     state=solved.get("data",{})
                     if state.get("native_accepted") is not True or state.get("out_of_date") is not False:
                         raise RuntimeError(f"Installed MCP motion calculation state differs: {solved}.")
+                    # Motion payloads need a second component: the force/spring/damper
+                    # pair selects one face on each body, and 3D contact takes the two
+                    # component names.  Every check reads the study's own feature list
+                    # because the handle CreateFeature returns describes the previous
+                    # feature on this build.
+                    second=(await call("insert_component", {"path":str(motion_part_path)}))["component"]
+                    await call("set_component_fixed", {"component_names":[second],"fixed":False})
+                    faces=(await call("list_faces"))["faces"]
+                    ordered=sorted(faces, key=lambda entry: entry["point_mm"][0])
+                    face_pair=[{"faces":[ordered[0]["index"]]},{"faces":[ordered[-1]["index"]]}]
+                    edges=(await call("list_edges"))["edges"]
+                    edge_pair=[{"edges":[edges[0]["index"]]},{"edges":[edges[-1]["index"]]}]
+                    force=await call("add_motion_force", {"name":"InstalledMotion","force_type":"linear","magnitude":10.0,"references":face_pair})
+                    if force["feature"]["type"]!="AEMLinearForce" or force["definition"]["force_type"]!=0 or abs(force["definition"]["magnitude"]-10.0)>1e-9:
+                        raise RuntimeError("Installed MCP linear force readback differs.")
+                    torque=await call("add_motion_force", {"name":"InstalledMotion","force_type":"torque","magnitude":5.0,"reverse_direction":True,"references":edge_pair})
+                    if torque["feature"]["type"]!="AEMTorque" or torque["definition"]["force_type"]!=1 or torque["definition"]["reverse_direction"] is not True:
+                        raise RuntimeError("Installed MCP torque readback differs.")
+                    spring=await call("add_motion_spring", {"name":"InstalledMotion","spring_type":"linear","spring_constant":1.0,"free_length":0.05,"references":face_pair})
+                    if spring["feature"]["type"]!="AEMLinearSpring" or abs(spring["definition"]["free_length"]-0.05)>1e-9:
+                        raise RuntimeError("Installed MCP spring readback differs.")
+                    damper=await call("add_motion_damper", {"name":"InstalledMotion","damper_type":"linear","damping_constant":0.5,"references":face_pair})
+                    if damper["feature"]["type"]!="AEMLinearDamper" or abs(damper["definition"]["damping_constant"]-0.5)>1e-9:
+                        raise RuntimeError("Installed MCP damper readback differs.")
+                    contact=await call("add_motion_contact", {"name":"InstalledMotion","components":[component,second],"stiffness":100000.0,"friction_option":"full","use_restitution":True,"restitution":0.3})
+                    if contact["feature"]["type"]!="AEM3DContact" or contact["definition"]["friction_option"]!=1 or abs(contact["definition"]["restitution"]-0.3)>1e-9:
+                        raise RuntimeError("Installed MCP 3D contact readback differs.")
+                    payloads=await call("list_motion_features", {"name":"InstalledMotion"})
+                    if not {"AEMLinearForce","AEMTorque","AEMLinearSpring","AEMLinearDamper","AEM3DContact"} <= {entry["type"] for entry in payloads["features"]}:
+                        raise RuntimeError(f"Installed MCP motion payload features are missing: {payloads}.")
                     await call("delete_motion_study", {"name":"InstalledMotion"})
                     # Animation frames only come out of an animation study; a basic-motion
                     # study owns the same timeline but its animator writes nothing.
