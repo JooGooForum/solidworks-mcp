@@ -47,8 +47,9 @@ Simulation、Motion、CAM、Routing 等官方模块需核对本机安装、许�
 
 ## 当前新增实现与验证
 
-默认工具共 180 个，仍未全覆盖。前一批新增 22 个：钣金 6 个、焊件 6 个、
-曲面编辑 3 个、Motion 算例管理 7 个。
+默认工具共 188 个，仍未全覆盖。前一批新增 22 个：钣金 6 个、焊件 6 个、
+曲面编辑 3 个、Motion 算例管理 7 个；本批新增 8 个 Motion 工具：运动特征查询、
+重力与线性/旋转马达创建、求解与结果读取、动画序列、播放控制、帧序列/视频导出。
 
 新增包覆创建与只读检查 2 个工具。在六个新建圆柱零件上实测凸起、凹陷、
 刻划及解析/样条方法：解析凸起增加 42 mm³、凹陷减少 38 mm³，样条结果误差
@@ -79,7 +80,8 @@ IWrapSketchFeatureData 不暴露方法、网格精度和全部目标面，查询
 多面替换、目标面引用保存、后置草图/复杂依赖、方法/网格修改和前述原生缺口仍待补齐。
 钣金验证板厚修改后的体积、展开/折叠状态及 DXF 实际几何；焊件验证管材
 解析体积、长度变化及切割清单；曲面验证缝合面积、加厚体积和偏移距离。
-Motion 在新建零件和装配体上验证算例生命周期、类型及时间轴读回。
+Motion 在新建零件和装配体上验证算例生命周期、类型及时间轴读回；运动特征、
+求解与结果读取、动画与导出的实测记录见后文 Motion 一节。
 
 随后新增 11 个直接编辑、参考点、坐标系及 XYZ/组合曲线工具。
 移动面的偏移、平移、旋转，删除面与修补孔，以及替换面均通过实际体积或面积检查；
@@ -155,8 +157,9 @@ Motion 在新建零件和装配体上验证算例生命周期、类型及时间�
 实例选择仅作用于 MCP 服务进程，不启动或关闭 SolidWorks，也不切换用户窗口。
 所选实例退出后不自动替换；只读可访问不等于建模健康。
 
-上述验证均使用新建测试文档。Motion 的动力学求解、载荷、接触及结果读取尚未实现；
-Simulation、CAM、Routing 等官方模块继续保留为待覆盖项。
+上述验证均使用新建测试文档。Motion 的载荷（力/力矩）、弹簧、阻尼、3D 接触
+特征、曲线图与 CSV 读取仍未实现；Simulation、CAM、Routing 等官方模块继续
+保留为待覆盖项。
 
 新增边界曲面创建及原生定义查询 2 个工具。12 个临时零件验证单/双方向、
 三个轮廓、按两个方向分别修剪及同时修剪、圆草图/模型边轮廓、法向条件和形成实体。
@@ -248,6 +251,51 @@ SetSystemValue3 虽即时读回数值，几何却延迟求解；EditRebuild3 会
 XYZ 驱动，不能据独立零件成功声称复杂上下文完成。新工具在调用前另核验实际选择引用。
 本机 swDimensionDrivenState_e 确认 0 未知、1 从动、2 驱动；修正原反置的 driven 标记，
 同时返回原生 driven_state。参考尺寸、未知状态和驱动尺寸不再混为同一个状态。
+
+## Motion 求解、结果与动画
+
+新增 8 个原生 Motion 工具：`list_motion_features`、`add_motion_gravity`、
+`add_motion_motor`、`solve_motion_study`、`get_motion_study_results`、
+`set_motion_study_animation`、`control_motion_study_playback`、
+`export_motion_study_frames`。算例生命周期在新建零件与装配体上实测；运动元素
+（引力与马达）只在装配体文档上有效，零件文档返回带 `document_type="part"` 的
+结构化失败，因为原生 `CreateFeature` 在零件上会抛 COM 服务器错误。测试文档
+结束前关闭。
+
+本批同时修正既有工具：`insert_component` 为加载引用文件而静默打开零件后会把
+活动文档切成该零件，后续装配体工具随即失败；现在插入后恢复装配体为活动文档并
+读回 `active_document`。安装协议改为装配体加插入零件的真实 Motion 流程，并暴露
+两个协议层约束：SaveAs 会改变文档标题，Basic Motion 算例拥有时间轴但动画导出
+不产出文件。215 项离线测试通过。
+
+重力特征按类型库 `swFeatureNameID_e` 值 74 创建，回读原生定义的实际强度 9.81、
+轴向索引 1（Y）和反向标志，并从 `GetMotionFeatures` 确认特征名（本机为“引力”）
+与类型 `AEMGravity`。线性与旋转马达按 77/78 创建，方向引用取自实际选中的装配体
+边，回读速度 25/30、`MotorType` 0/1 与反向标志，特征类型分别为 `AEMLinearMotor`
+与 `AEMRotationalMotor`；`ConstantSpeedMotor` 的官方参数单位是 RPM，工具按原生
+数值原样读回，未换算成 mm/s。
+
+`solve_motion_study` 激活算例后调用原生 `Calculate`，再读取该算例类型对应的结果
+对象：本机 `Calculate` 返回 True、`IsOutOfDate` 为 False，但在重力加两个马达的
+装配体上，0/0.5/1.0 s 采样到的质心位置与速度全部为零，工具按要求返回失败并给出
+该观测，而不是以 True 当作求解成功。`get_motion_study_results` 读取同一结果对象的
+质心位置、线速度/加速度、角速度/加速度与欧拉角，三组时间分别返回三个分量。
+
+动画侧 `CreateByRotateModel` 把时间轴从 0 改为 2.0 s 并回读成功；`CreateByExplode`
+与 `CreateByCollapse` 在无爆炸视图的本机上返回原生 True 但不延长/覆盖时间轴，
+工具因此返回失败并保留原始值。帧序列导出用屏幕渲染器写出 16 个 PNG
+（3,369,810 字节），逐个文件核对非零大小；同一路径的 AVI 导出原生返回 False 且
+没有任何文件，工具返回失败。播放控制读取/设置播放模式并核对 `IsPlaying`，
+loop + play 与 stop 均通过。
+
+本机环境限制已核实并保留为缺口：注册表与本进程模块列表中没有 SOLIDWORKS Motion
+动力学插件（ADAMS 求解器），`GetSupportedStudyTypes` 虽报告掩码 7，但把算例类型
+设为 Motion Analysis 会被静默忽略，Basic Motion 可以切换却得不到任何求解结果；
+AVI 与 JPG 导出、PhotoWorks 渲染器同样被拒绝，只有屏幕渲染器的 BMP/PNG 序列成功。
+`GetProperties(4)` 返回的 COSMOSMotion 属性可读（积分器类型、误差容限、最大迭代
+次数等），但该对象不暴露 `GetFrameRate/SetFrameRate`。
+力与力矩、弹簧、阻尼、3D 接触特征、曲线图与 CSV 读取、求解器/许可可用时的真实
+动力学核验、图像尺寸与比例参数、运动事件回调仍待补齐。
 
 ## 原生 API 清点
 

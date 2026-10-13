@@ -38,7 +38,10 @@ FEATURE_TOOLS = {
 
 MODULE_TOOLS = {"Motion": ["list_motion_studies", "create_motion_study", "activate_motion_study",
                            "duplicate_motion_study", "delete_motion_study", "set_motion_study_type",
-                           "set_motion_study_timing"]}
+                           "set_motion_study_timing", "list_motion_features", "add_motion_gravity",
+                           "add_motion_motor", "solve_motion_study", "get_motion_study_results",
+                           "set_motion_study_animation", "control_motion_study_playback",
+                           "export_motion_study_frames"]}
 
 
 def report(api):

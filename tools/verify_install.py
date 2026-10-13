@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 import sys
 import unittest
+import uuid
 
 
 async def protocol(install, expected, catalog, scratch):
@@ -51,6 +52,13 @@ async def protocol(install, expected, catalog, scratch):
                 if payload["ok"]:
                     raise RuntimeError(f"Installed MCP falsely accepted an ignored native edit: {name}.")
                 return payload.get("data", {})
+            async def native_call(name, arguments=None):
+                # A native failure is data here: motion solving and rendering report
+                # what the session actually did, and the caller asserts the fields.
+                output = await session.call_tool(name, arguments or {})
+                if output.isError:
+                    raise RuntimeError(f"Installed MCP protocol error: {name}: {output.content[0].text}")
+                return json.loads(output.content[0].text)
             connections = await call("list_solidworks_sessions")
             attached = connections["attached_process_id"]
             if attached is None:
@@ -60,11 +68,13 @@ async def protocol(install, expected, catalog, scratch):
                 raise RuntimeError("Installed MCP instance selection differs.")
             initial = await call("list_open_documents")
             original = initial["active_title"]
+            initial_titles = {document["title"] for document in initial["documents"]}
             title = None
             wrap_title = None
             dome_title = None
             sketch3d_title = None
             dimension_title = None
+            motion_title = None
             try:
                 if scratch:
                     title = (await call("create_new_document", {"kind": "part"}))["document"]["title"]
@@ -355,19 +365,85 @@ async def protocol(install, expected, catalog, scratch):
                     positions=(await call("list_sketch_points", {"sketch_name":"InstalledAxisDimensions"}))["points"]
                     if abs(abs(positions[1]["model_point_mm"][0]-positions[0]["model_point_mm"][0])-18)>.01:
                         raise RuntimeError("Installed MCP later dimension edit did not drive spatial geometry.")
+                    motion_folder=Path((await call("solidworks_status"))["output_root"])/f"installed-verify-{uuid.uuid4().hex}"
+                    # The scratch part from the dimension block is still the active document,
+                    # so the part-side refusal is checked before anything else takes focus.
+                    refused=await rejected_call("add_motion_gravity", {"name":"InstalledMotion","strength":9.81,"axis":"y"})
+                    if refused.get("document_type")!="part":
+                        raise RuntimeError("Installed MCP does not refuse motion elements on a part document with a documented reason.")
+                    motion_part_title=(await call("create_new_document", {"kind":"part"}))["document"]["title"]
+                    await call("create_sketch", {"plane":"front","name":"InstalledMotionProfile"})
+                    await call("draw_rectangle", {"x1_mm":0,"y1_mm":0,"x2_mm":10,"y2_mm":10})
+                    await call("close_sketch")
+                    await call("boss_extrude", {"sketch_name":"InstalledMotionProfile","depth_mm":10})
+                    motion_part_path=motion_folder/"InstalledMotionPart.SLDPRT"
+                    await call("save_document", {"path":str(motion_part_path)})
+                    motion_part_title=(await call("list_open_documents"))["active_title"]
+                    await call("close_document", {"name":motion_part_title,"discard_changes":True})
+                    motion_part_title=None
+                    motion_title=(await call("create_new_document", {"kind":"assembly"}))["document"]["title"]
+                    component=(await call("insert_component", {"path":str(motion_part_path)}))["component"]
+                    await call("set_component_fixed", {"component_names":[component],"fixed":False})
+                    created=await call("create_motion_study", {"name":"InstalledMotion","type":"animation"})
+                    if created["study"]["type"]!="animation":
+                        raise RuntimeError("Installed MCP motion study type readback differs.")
+                    switched=await call("set_motion_study_type", {"name":"InstalledMotion","type":"basic_motion"})
+                    if switched["study"]["type"]!="basic_motion":
+                        raise RuntimeError("Installed MCP motion study type switch differs.")
+                    await call("set_motion_study_timing", {"name":"InstalledMotion","duration_sec":1.0,"time_sec":0})
+                    gravity=await call("add_motion_gravity", {"name":"InstalledMotion","strength":9.81,"axis":"y","reverse_direction":False})
+                    if gravity["feature"]["type"]!="AEMGravity" or abs(gravity["definition"]["strength"]-9.81)>1e-9 or gravity["definition"]["axis"]!=1 or gravity["definition"]["reverse_direction"]:
+                        raise RuntimeError("Installed MCP gravity feature readback differs.")
+                    features=await call("list_motion_features", {"name":"InstalledMotion"})
+                    if features["count"]!=1 or features["features"][0]["name"]!=gravity["feature"]["name"]:
+                        raise RuntimeError("Installed MCP motion feature listing differs.")
+                    sampled=await call("get_motion_study_results", {"name":"InstalledMotion","component":component,"times":[0.0,1.0]})
+                    if [sample["time_sec"] for sample in sampled["samples"]]!=[0.0,1.0] or any(len(sample["position_mm"])!=3 for sample in sampled["samples"]):
+                        raise RuntimeError("Installed MCP motion result sampling differs.")
+                    solved=await native_call("solve_motion_study", {"name":"InstalledMotion","sample_times":[0.0,0.5,1.0]})
+                    state=solved.get("data",{})
+                    if state.get("native_accepted") is not True or state.get("out_of_date") is not False:
+                        raise RuntimeError(f"Installed MCP motion calculation state differs: {solved}.")
+                    await call("delete_motion_study", {"name":"InstalledMotion"})
+                    # Animation frames only come out of an animation study; a basic-motion
+                    # study owns the same timeline but its animator writes nothing.
+                    await call("create_motion_study", {"name":"InstalledFrames","type":"animation"})
+                    animation=await call("set_motion_study_animation", {"name":"InstalledFrames","action":"rotate_model","duration_sec":2.0,"start_time_sec":0})
+                    if animation["study"]["duration_sec"]<2.0:
+                        raise RuntimeError("Installed MCP animation timeline readback differs.")
+                    frames=await call("export_motion_study_frames", {"name":"InstalledFrames","path":str(motion_folder/"InstalledFrames.png"),"format":"png","frame_per_second":7.5})
+                    if frames["file_count"]<1 or frames["bytes"]<=0 or not all((motion_folder/name).is_file() for name in frames["files"]):
+                        raise RuntimeError("Installed MCP frame export wrote no verifiable file on disk.")
+                    played=await native_call("control_motion_study_playback", {"name":"InstalledFrames","play_mode":"loop","action":"play","from_start":True})
+                    if (played.get("data") or {}).get("play_mode")!=2:
+                        raise RuntimeError(f"Installed MCP animation play-mode readback differs: {played}.")
+                    stopped=await call("control_motion_study_playback", {"name":"InstalledFrames","action":"stop"})
+                    if stopped["playing"] is not False:
+                        raise RuntimeError("Installed MCP animation playback did not stop.")
+                    await call("delete_motion_study", {"name":"InstalledFrames"})
+                    remaining=await call("list_motion_studies")
+                    if {study["name"] for study in remaining["studies"]} & {"InstalledMotion","InstalledFrames"}:
+                        raise RuntimeError(f"Installed MCP motion study deletion differs: {remaining}.")
             finally:
-                if dimension_title:
-                    await call("close_document", {"name":dimension_title,"discard_changes":True})
-                if sketch3d_title:
-                    await call("close_document", {"name": sketch3d_title, "discard_changes": True})
-                if dome_title:
-                    await call("close_document", {"name": dome_title, "discard_changes": True})
-                if wrap_title:
-                    await call("close_document", {"name": wrap_title, "discard_changes": True})
-                if title:
-                    await call("close_document", {"name": title, "discard_changes": True})
-                if scratch and original:
-                    await call("activate_document", {"name": original})
+                if scratch:
+                    # Every scratch document is closed by title, including ones renamed by
+                    # SaveAs.  Closing an assembly unloads its components, so one pass can
+                    # leave a part behind; a failing close never hides the original error.
+                    try:
+                        for _ in range(2):
+                            documents = [document for document in (await call("list_open_documents"))["documents"]
+                                         if document["title"] not in initial_titles]
+                            for document in documents:
+                                try:
+                                    await call("close_document", {"name":document["title"],"discard_changes":True})
+                                except Exception:
+                                    pass
+                            if not documents:
+                                break
+                        if original:
+                            await call("activate_document", {"name": original})
+                    except Exception:
+                        pass
             if catalog:
                 catalog.parent.mkdir(parents=True, exist_ok=True)
                 catalog.write_text(json.dumps([tool.model_dump(mode="json") for tool in response.tools],

@@ -122,11 +122,22 @@ def insert_component(args: dict[str, Any]) -> dict[str, Any]:
     if component is None:
         return result(False, f"SOLIDWORKS did not insert {path.name} into the assembly.")
     rebuild(doc)
+    # The silent OpenDoc6 above activates the referenced part, so the assembly is
+    # no longer the active document and every follow-up assembly tool would fail
+    # its own document check.  Put the assembly back and report the readback.
+    title = str(value(doc, "GetTitle"))
+    active = app.ActiveDoc
+    if active is None or str(value(active, "GetTitle")) != title:
+        app.ActivateDoc3(title, False, 0, byref_long(0))
+        active = app.ActiveDoc
+    active_title = str(value(active, "GetTitle")) if active is not None else None
     return result(
-        True,
-        f"Inserted {path.name}.",
+        active_title == title,
+        f"Inserted {path.name}." if active_title == title else
+        f"Inserted {path.name}, but SOLIDWORKS left another document active.",
         component=str(safe(component, "Name2", "")),
         path=str(path),
+        active_document=active_title,
     )
 
 
