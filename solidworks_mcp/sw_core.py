@@ -359,7 +359,7 @@ _FEATURE_MANAGER_METHODS = (
 
 _EXTENSION_METHODS = (
     "SelectByID2", "SelectByRay", "AddDimension", "DeleteSelection2", "SaveAs", "SaveAs3",
-    "GetMassProperties2", "GetWhatsWrong",
+    "GetMassProperties2", "GetWhatsWrong", "GetAnnotations", "GetUserPreferenceString",
 )
 
 # Grouped by the interface the installed sldworks.tlb declares them on.  The

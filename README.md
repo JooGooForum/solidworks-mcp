@@ -105,11 +105,14 @@ added to that view rather than a document-wide count.
 
 Annotations created by `insert_model_annotations`, `auto_dimension_view`,
 `insert_center_marks`, `insert_centerlines`, and `add_note` default to the
-SOLIDWORKS **Per Standard** state. The connector temporarily selects the native
-`-Per Standard-` layer-manager state, restores the previously active layer after
-the operation, and reads back the actual layer assigned by the document
-standard without reassigning it. Existing annotations—including title-block
-content supplied by a drawing template—are not changed.
+effective SOLIDWORKS **Per Standard** layer. The connector reads the applicable
+Document Properties mapping for each annotation or dimension subtype, assigns
+that real named layer, clears visual overrides, rebuilds, and verifies native
+readback. Empty, `None`, `FORMAT`, missing, or ambiguous mappings fail rather
+than silently leaving an annotation unlayered. `inspect_drawing_layer_standard`
+reports the available layers, mappings, existing assignments, and invalid
+mappings without changing the drawing. Existing annotations—including
+title-block content supplied by a drawing template—are not changed.
 
 ## Testing
 
