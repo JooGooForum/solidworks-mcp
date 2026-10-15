@@ -202,11 +202,12 @@ class DocumentTemplateTests(unittest.TestCase):
 
 class AutoDimensionViewTests(unittest.TestCase):
     def drawing(self, *, activate=True, select=True, active_name="Drawing View2"):
-        state = {"dimensions": 0}
+        state = {"dimensions": 0, "annotations": []}
         layer_state = {"current": "Dimensions"}
         layer_manager = SimpleNamespace(
             GetCurrentLayer=lambda: layer_state["current"],
             SetCurrentLayer=lambda name: layer_state.update(current=name) or True,
+            GetLayerList=lambda: ["Dimensions"],
         )
         view = SimpleNamespace(
             GetName2=lambda: "Drawing View2",
@@ -221,8 +222,22 @@ class AutoDimensionViewTests(unittest.TestCase):
         )
         ext = Mock()
         ext.SelectByID2.return_value = select
+        ext.GetAnnotations.side_effect = lambda: state["annotations"]
+        ext.GetUserPreferenceString.return_value = "Dimensions"
         activate_view = Mock(return_value=activate)
-        auto_dimension = Mock(side_effect=lambda *args: state.update(dimensions=5) or 0)
+        annotation = SimpleNamespace(
+            Layer="",
+            LayerOverride=3,
+            GetType=lambda: 4,
+            GetName=lambda: "D1@Drawing View2",
+            GetPosition=lambda: [0.1, 0.2, 0.0],
+            GetSpecificAnnotation=lambda: SimpleNamespace(Type2=2),
+        )
+        def create_dimensions(*_args):
+            state.update(dimensions=5)
+            state["annotations"] = [annotation]
+            return 0
+        auto_dimension = Mock(side_effect=create_dimensions)
         doc = SimpleNamespace(
             GetFirstView=lambda: sheet,
             ActivateView=activate_view,
@@ -231,6 +246,7 @@ class AutoDimensionViewTests(unittest.TestCase):
             GetLayerManager=lambda: layer_manager,
             AutoDimension=auto_dimension,
             ClearSelection2=lambda _all: None,
+            EditRebuild3=lambda: True,
         )
         return doc, ext
 

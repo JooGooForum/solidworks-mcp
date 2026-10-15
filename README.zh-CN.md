@@ -96,9 +96,11 @@ SOLIDWORKS 无法可靠回读零件和装配体的来源模板路径，因此结
 
 `insert_model_annotations`、`auto_dimension_view`、`insert_center_marks`、
 `insert_centerlines` 和 `add_note` 创建的注解默认使用 SOLIDWORKS 的
-**按标准（Per Standard）**状态。连接器会临时选择原生图层管理器中的
-`-Per Standard-` 状态，操作完成后恢复之前的当前图层，并回读文档标准实际分配的图层，
-而不会重新分配该图层。现有注解（包括工程图模板提供的标题栏内容）不会被更改。
+**按标准（Per Standard）**有效图层。连接器会根据每种注解或尺寸子类型读取“文档属性”
+中的图层映射，分配该真实命名图层，清除显示覆盖，重建并验证原生回读。空值、`None`、
+`FORMAT`、不存在或有歧义的映射会导致失败，而不会默默留下无图层注解。
+`inspect_drawing_layer_standard` 可只读报告可用图层、标准映射、现有分配和无效映射。
+现有注解（包括工程图模板提供的标题栏内容）不会被更改。
 
 ## 测试
 
