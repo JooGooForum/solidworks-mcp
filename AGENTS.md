@@ -11,10 +11,10 @@
 ## Merge permissions / 合并权限
 
 - `main` is protected. Changes require a pull request and all four `offline` checks (Python 3.10–3.13); conversations must be resolved. Force pushes and branch deletion are blocked, including for administrators.
-- Automation may create branches, commit, push branches, open pull requests and wait for CI. **Do not merge pull requests, push directly to `main`, or change branch protection.** The repository owner (@Slacker-LLC) merges.
+- Automation may create branches, commit, push branches, open pull requests and wait for CI. **Do not merge pull requests into the upstream `Slacker-LLC/solidworks-mcp` repository, push directly to its `main`, or change branch protection.** The upstream repository owner (@Slacker-LLC) merges. In a user-owned fork, automation may merge a pull request into the fork's `main` only after that fork's owner explicitly requests the merge; direct pushes to `main` remain prohibited.
 
 - `main` 已启用保护。所有改动必须经过 PR，并通过四个 `offline` 检查（Python 3.10–3.13）；必须解决全部会话。管理员也不能强推或删除分支。
-- 自动化可以创建分支、提交、推送分支、开 PR 并等待 CI。**不得合并 PR、直接推送 `main` 或更改分支保护。** PR 由仓库所有者（@Slacker-LLC）合并。
+- 自动化可以创建分支、提交、推送分支、开 PR 并等待 CI。**不得将 PR 合并到上游 `Slacker-LLC/solidworks-mcp` 仓库，不得直接推送到其 `main`，也不得更改分支保护。** 上游 PR 由仓库所有者（@Slacker-LLC）合并。在用户自有的 fork 中，仅当该 fork 的所有者明确要求合并时，自动化才可以将 PR 合并到该 fork 的 `main`；仍然禁止直接推送到 `main`。
 
 ## Verification / 验证要求
 
@@ -25,3 +25,4 @@
 - 代码改动前运行 `python -m unittest discover -s tests -p 'test_*.py'`。
 - 涉及 COM、几何或 SOLIDWORKS 状态的改动，还要运行对应的 `tests/live_*_regression.py`，并读回真实几何、面积、体积或原生定义。不能只凭返回码判定成功。
 - PR 正文说明改动内容、原因、验证方式和剩余缺口；失败项如实记录为失败。
+
