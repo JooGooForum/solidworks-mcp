@@ -9,8 +9,11 @@
 """Sheet-metal live checks using scratch documents only, restoring the session."""
 
 import uuid
-from live_expansion_regression import call, near, volume
-from solidworks_mcp.sw_core import OUTPUT_ROOT, as_list, byref_long, running_app, value
+try:
+    from .live_expansion_regression import call, near, volume
+except ImportError:  # direct script execution
+    from live_expansion_regression import call, near, volume
+from solidworks_mcp.sw_core import OUTPUT_ROOT, apply_transform, as_list, byref_long, running_app, value
 
 
 def run():
@@ -34,18 +37,36 @@ def run():
         near(parameters["thickness_mm"], 3, "updated thickness")
         near(parameters["bend_radius_mm"], 2, "updated radius")
         near(parameters["k_factor"], 0.4, "updated K-factor")
+        faces = call("list_faces")["faces"]
+        sketch_face = max(faces, key=lambda item: item.get("area_mm2", 0))["index"]
+        call("create_sketch", face_index=sketch_face, name="DXF_Bend_Line")
+        sketch = app.ActiveDoc.SketchManager.ActiveSketch
+        transform = list(value(value(sketch, "ModelToSketchTransform"), "ArrayData"))
+        points = [apply_transform([coordinate / 1000 for coordinate in item["point_mm"]], transform)
+                  for item in call("list_vertices")["vertices"]]
+        xs, ys = [point[0] * 1000 for point in points], [point[1] * 1000 for point in points]
+        middle_x = (min(xs) + max(xs)) / 2
+        call("draw_line", x1_mm=middle_x, y1_mm=min(ys), x2_mm=middle_x, y2_mm=max(ys))
+        call("close_sketch")
+        call("sheet_metal_sketched_bend", sketch_name="DXF_Bend_Line", angle_degrees=90,
+             use_default_radius=True, name="DXF_Test_Bend")
         call("set_flat_pattern", flat=True)
         assert all(not f["suppressed"] for f in call("list_sheet_metal_features")["flat_patterns"])
-        near(volume(), 15000, "flattened sheet volume")
+        assert volume() >= 14999, "flattening unexpectedly removed sheet-metal volume"
         call("set_flat_pattern", flat=False)
         assert all(f["suppressed"] for f in call("list_sheet_metal_features")["flat_patterns"])
         folder = OUTPUT_ROOT / ".sheetmetal-tests" / uuid.uuid4().hex
         call("save_document", path=str(folder / "plate.SLDPRT"))
-        call("export_flat_pattern", path=str(folder / "plate.dxf"))
+        exported = call("export_flat_pattern", path=str(folder / "plate.dxf"))
+        assert exported["entity_count"] > 0 and exported["bend_entity_count"] > 0, exported
         body_feature = call("list_sheet_metal_features")["sheet_metal"][0]["feature"]
-        call("set_sheet_metal_parameters", feature_name=body_feature, thickness_mm=4, bend_radius_mm=3, k_factor=0.3)
-        near(volume(), 20000, "body sheet thickness override volume")
-        print("Sheet-metal creation, parameter edit, flatten/refold and DXF verified.", flush=True)
+        token = call("inspect_sheet_metal_edit")["edit_token"]
+        call("set_sheet_metal_parameters", feature_name=body_feature, thickness_mm=4,
+             bend_radius_mm=3, k_factor=0.3, edit_token=token)
+        verified = call("verify_sheet_metal_part", thickness_mm=4, inside_radius_mm=3,
+                        expected_body_count=1, minimum_volume_mm3=1)
+        assert all(check["ok"] for check in verified["checks"]), verified
+        print("Sheet-metal creation, guarded parameter edit, flatten/refold, DXF entities and bend lines verified.", flush=True)
     finally:
         for title in [str(value(doc, "GetTitle")) for doc in as_list(value(app, "GetDocuments"))]:
             if title not in initial:

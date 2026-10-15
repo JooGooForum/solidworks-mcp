@@ -6,7 +6,7 @@ MCP server that drives a **running** SOLIDWORKS session over its COM API. It
 attaches to the session you already have open; it does not launch SOLIDWORKS,
 register an add-in or touch the network.
 
-192 tools. Covered vs not covered: [COVERAGE.md](COVERAGE.md).
+212 tools. Covered vs not covered: [COVERAGE.md](COVERAGE.md).
 
 <!-- mcp-name: io.github.Slacker-LLC/solidworks-mcp -->
 
@@ -46,10 +46,21 @@ command = 'C:\path\to\.venv\Scripts\solidworks-mcp.exe'
 
 ## Configuration
 
+### Sheet-metal workflows
+
+`list_sheet_metal_profiles` resolves the `standard_2026` profile and its **2026 plaat** template. Set `SW_MCP_SHEETMETAL_TEMPLATE` to the exact `.prtdot` path, or place the template under `SW_MCP_TEMPLATE_DIR`. Plate and panel creation requires explicit thickness, inside radius, and `dimension_mode` (`flat_blank` or `finished_outer`), creates an unsaved document, and never invokes PDM.
+
+`create_sheet_metal_panel` accepts semantic `left`, `right`, `bottom`, and `top` edge-flange declarations. Optional hems, break corners, closed corners, and corner reliefs refer to those sides rather than transient topology indices; the workflow resolves native topology after each feature and stops on mismatched readback or rebuild errors.
+
+Inspect existing parts before guarded edits. Edit tokens bind the current document, configuration, feature update stamps, persistent face/edge topology, feature state and bounds. Every guarded native apply schema exposes `edit_token`; it is required when the part already has a saved path. Sketch alignment reports model-space line directions, gaps, existing relations, and exact persistent references; apply must echo those references, adds a direct native collinear relation, and never substitutes converted geometry. Flat-pattern suppression, native unfold/fold features and feature-tree rollback are distinct operations. DXF export parses the resulting entity section and requires bend-layer entities when bend lines were requested for a part that contains bends.
+
+For a complete description of the tools, contracts, dimensional modes, and safety boundaries, see [Sheet-metal workflow toolkit](docs/SHEET_METAL_WORKFLOWS.md).
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `SW_MCP_OUTPUT_ROOT` | `~/Documents/solidworks-mcp` | Everything the server writes stays under here. |
 | `SW_MCP_TEMPLATE_DIR` | auto-discovered | `.prtdot` / `.asmdot` / `.drwdot` template directory. |
+| `SW_MCP_SHEETMETAL_TEMPLATE` | unset | Exact `.prtdot` path for the **2026 plaat** profile. |
 | `SW_MCP_DEMO_TOOLS` | unset | `1` adds demo tools that degrade tool selection. |
 | `SW_MCP_SESSION_PID` | unset | Attach to a specific existing instance. |
 

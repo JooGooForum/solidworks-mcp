@@ -32,6 +32,12 @@
           "isSecret": false
         },
         {
+          "name": "SW_MCP_SHEETMETAL_TEMPLATE",
+          "description": "Exact .prtdot path for the 2026 plaat sheet-metal workflow profile.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
           "name": "SW_MCP_DEMO_TOOLS",
           "description": "Set to 1 to register the opt-in basketball demo tools. Off by default, because they measurably degrade tool selection.",
           "isRequired": false,

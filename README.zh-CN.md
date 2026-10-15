@@ -5,7 +5,7 @@
 通过 COM API 驱动**正在运行**的 SOLIDWORKS 会话的 MCP 服务器。它连接你已经打开的
 会话，不启动 SOLIDWORKS、不注册插件、不访问网络。
 
-192 个工具。已覆盖与未覆盖清单：[COVERAGE.zh-CN.md](COVERAGE.zh-CN.md)。
+212 个工具。已覆盖与未覆盖清单：[COVERAGE.zh-CN.md](COVERAGE.zh-CN.md)。
 
 ## 环境要求
 
@@ -43,10 +43,21 @@ command = 'C:\path\to\.venv\Scripts\solidworks-mcp.exe'
 
 ## 配置
 
+### 钣金工作流
+
+`list_sheet_metal_profiles` 用于解析 `standard_2026` 配置及其 **2026 plaat** 模板。可将 `SW_MCP_SHEETMETAL_TEMPLATE` 设为准确的 `.prtdot` 路径，或把模板放在 `SW_MCP_TEMPLATE_DIR` 下。创建板件和面板时必须明确提供板厚、内折弯半径及 `dimension_mode`（`flat_blank` 或 `finished_outer`）；工具只创建未保存文档，不会调用 PDM。
+
+`create_sheet_metal_panel` 使用语义化的 `left`、`right`、`bottom`、`top` 边线法兰声明。可选的褶边、折断角、闭合角和角释放引用这些边，而不是短暂的拓扑索引；工作流会在每个特征之后重新解析原生拓扑，并在读回不符或重建错误时停止。
+
+受保护的编辑前必须先检查现有零件。编辑令牌绑定当前文档、配置、特征更新戳、持久面/边拓扑、特征状态和边界框。所有受保护的原生应用工具都公开 `edit_token`；活动零件已有保存路径时必须提供。草图对齐会报告模型空间方向、间隙、现有关系和准确的持久引用；应用时必须回传这些引用，并且只添加直接原生共线关系，不会改用转换几何。展开图抑制、原生展开/折叠特征和特征树回滚是不同操作。DXF 导出会解析生成文件的实体段；当零件含折弯且请求折弯线时，必须读到折弯图层实体。
+
+完整的工具、契约、尺寸模式与安全边界说明见[钣金工作流工具包](docs/SHEET_METAL_WORKFLOWS.zh-CN.md)。
+
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |
 | `SW_MCP_OUTPUT_ROOT` | `~/Documents/solidworks-mcp` | 服务器写出的所有文件都在此目录下。 |
 | `SW_MCP_TEMPLATE_DIR` | 自动发现 | `.prtdot` / `.asmdot` / `.drwdot` 模板目录。 |
+| `SW_MCP_SHEETMETAL_TEMPLATE` | 未设置 | **2026 plaat** 配置使用的准确 `.prtdot` 路径。 |
 | `SW_MCP_DEMO_TOOLS` | 未设置 | 设为 `1` 会加入降低工具选择质量的演示工具。 |
 | `SW_MCP_SESSION_PID` | 未设置 | 连接指定的已有实例。 |
 
