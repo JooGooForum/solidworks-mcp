@@ -64,21 +64,27 @@ class DrawingAnnotationLayerTests(unittest.TestCase):
             with sw_drawing._create_annotations_per_standard(FakeDocument(None)):
                 pass
 
-    def test_returned_annotations_are_reset_and_verified(self):
+    def test_returned_annotation_layers_are_read_without_reassignment(self):
         direct = FakeAnnotation()
-        owned = FakeAnnotation()
-        report = sw_drawing._set_per_standard([direct, FakeAnnotationOwner(owned)])
+        owned = FakeAnnotation("Notes", 2)
+        report = sw_drawing._read_annotation_layers([direct, FakeAnnotationOwner(owned)])
 
-        self.assertEqual(report["annotations_verified_per_standard"], 2)
-        for annotation in (direct, owned):
-            self.assertEqual(annotation.Layer, "")
-            self.assertEqual(annotation.LayerOverride, 0)
+        self.assertEqual(report["annotations_created_with_per_standard"], 2)
+        self.assertEqual(
+            report["annotation_layer_readback"],
+            [
+                {"layer": "Dimensions", "layer_override": 7},
+                {"layer": "Notes", "layer_override": 2},
+            ],
+        )
+        self.assertEqual((direct.Layer, direct.LayerOverride), ("Dimensions", 7))
+        self.assertEqual((owned.Layer, owned.LayerOverride), ("Notes", 2))
 
     def test_unrelated_template_annotations_are_not_touched(self):
         template_annotation = FakeAnnotation("Title Block", 3)
         created_annotation = FakeAnnotation("Dimensions", 7)
 
-        sw_drawing._set_per_standard([created_annotation])
+        sw_drawing._read_annotation_layers([created_annotation])
 
         self.assertEqual(template_annotation.Layer, "Title Block")
         self.assertEqual(template_annotation.LayerOverride, 3)

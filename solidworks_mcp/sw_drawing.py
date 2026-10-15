@@ -850,24 +850,20 @@ def _annotation_object(item: Any) -> Any:
     return safe(item, "GetAnnotation")
 
 
-def _set_per_standard(items: Any) -> dict[str, Any]:
-    """Reset returned annotations to the layer/override state behind Per Standard."""
-    checked = 0
+def _read_annotation_layers(items: Any) -> dict[str, Any]:
+    """Read layers assigned by the document standard without changing them."""
+    layers: list[dict[str, Any]] = []
     for item in as_list(items):
         annotation = _annotation_object(item)
         if annotation is None:
             continue
-        annotation.Layer = ""
-        annotation.LayerOverride = 0
         layer = str(value(annotation, "Layer") or "")
         override = int(value(annotation, "LayerOverride") or 0)
-        if layer or override:
-            raise RuntimeError(
-                f"Annotation layer readback did not match Per Standard: layer={layer!r}, "
-                f"override={override}."
-            )
-        checked += 1
-    return {"annotations_verified_per_standard": checked}
+        layers.append({"layer": layer, "layer_override": override})
+    return {
+        "annotations_created_with_per_standard": len(layers),
+        "annotation_layer_readback": layers,
+    }
 
 
 @tool(
@@ -935,7 +931,7 @@ def insert_model_annotations(args: dict[str, Any]) -> dict[str, Any]:
             bool(args.get("hidden_feature_dimensions", False)),
             False,
         )
-        annotation_state = _set_per_standard(inserted)
+        annotation_state = _read_annotation_layers(inserted)
     rebuild(doc)
     clear_selection(doc)
     views = [_view_entry(v, i) for i, v in enumerate(_iter_views(doc))]
@@ -1158,7 +1154,7 @@ def insert_center_marks(args: dict[str, Any]) -> dict[str, Any]:
             bool(args.get("propagate", True)),
             bool(args.get("slots", False)),
         )
-        annotation_state = _set_per_standard(marks)
+        annotation_state = _read_annotation_layers(marks)
     rebuild(doc)
     clear_selection(doc)
     return result(
@@ -1210,7 +1206,7 @@ def insert_centerlines(args: dict[str, Any]) -> dict[str, Any]:
 
     with _create_annotations_per_standard(doc) as layer_state:
         lines = doc.InsertCenterLine2()
-        annotation_state = _set_per_standard(lines)
+        annotation_state = _read_annotation_layers(lines)
     rebuild(doc)
     clear_selection(doc)
     count = len(as_list(lines))
@@ -1242,7 +1238,7 @@ def add_note(args: dict[str, Any]) -> dict[str, Any]:
     clear_selection(doc)
     with _create_annotations_per_standard(doc) as layer_state:
         note = flag_methods(doc, "InsertNote").InsertNote(str(args["text"]))
-        annotation_state = _set_per_standard(note)
+        annotation_state = _read_annotation_layers(note)
     if note is None:
         return result(False, "SOLIDWORKS did not create the note.")
     try:

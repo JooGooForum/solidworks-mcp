@@ -107,9 +107,9 @@ Annotations created by `insert_model_annotations`, `auto_dimension_view`,
 `insert_center_marks`, `insert_centerlines`, and `add_note` default to the
 SOLIDWORKS **Per Standard** state. The connector temporarily selects the native
 `-Per Standard-` layer-manager state, restores the previously active layer after
-the operation, and resets returned annotations to an empty named layer with no
-color, line-style, or line-width override. Existing annotations—including
-title-block content supplied by a drawing template—are not reassigned.
+the operation, and reads back the actual layer assigned by the document
+standard without reassigning it. Existing annotations—including title-block
+content supplied by a drawing template—are not changed.
 
 ## Testing
 
