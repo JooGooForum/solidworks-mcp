@@ -156,6 +156,110 @@ class DocumentTemplateTests(unittest.TestCase):
         self.assertTrue(payload["data"]["first_angle"])
         self.assertEqual(payload["data"]["sheet_format_path"], r"C:\formats\A4.slddrt")
 
+    def test_create_drawing_preserves_sheet_format_when_applying_overrides(self):
+        template = self.template("A4.drwdot")
+        sheet = SimpleNamespace(
+            GetName=lambda: "Sheet1",
+            GetProperties2=lambda: [8, 8, 1.0, 2.0, False, 0.42, 0.297],
+            GetTemplateName=lambda: r"C:\formats\A4.slddrt",
+        )
+        drawing = document(3, "Drawing1")
+        drawing.GetCurrentSheet = lambda: sheet
+        drawing.GetSheetNames = lambda: ["Sheet1", "DWG"]
+        drawing.SetupSheet5 = Mock()
+        created = {
+            "ok": True,
+            "data": {"template": {}, "verification": {}},
+        }
+        with patch.object(sw_drawing, "new_document", return_value=created), \
+                patch.object(sw_drawing, "require_drawing", return_value=(Mock(), drawing)):
+            payload = sw_drawing.create_drawing({"template_path": str(template), "first_angle": True})
+        self.assertTrue(payload["ok"])
+        setup = drawing.SetupSheet5.call_args.args
+        self.assertEqual(setup[3:5], (1.0, 2.0))
+        self.assertTrue(setup[5])
+        self.assertEqual(setup[6], r"C:\formats\A4.slddrt")
+        self.assertEqual([item["name"] for item in payload["data"]["sheets"]], ["Sheet1", "DWG"])
+
+    def test_create_drawing_without_overrides_does_not_reset_sheet(self):
+        template = self.template("A4.drwdot")
+        sheet = SimpleNamespace(
+            GetName=lambda: "Sheet1",
+            GetProperties2=lambda: [8, 8, 1.0, 1.0, True, 0.42, 0.297],
+            GetTemplateName=lambda: r"C:\formats\A4.slddrt",
+        )
+        drawing = document(3, "Drawing1")
+        drawing.GetCurrentSheet = lambda: sheet
+        drawing.GetSheetNames = lambda: ["Sheet1"]
+        drawing.SetupSheet5 = Mock()
+        created = {"ok": True, "data": {"template": {}, "verification": {}}}
+        with patch.object(sw_drawing, "new_document", return_value=created), \
+                patch.object(sw_drawing, "require_drawing", return_value=(Mock(), drawing)):
+            payload = sw_drawing.create_drawing({"template_path": str(template)})
+        self.assertTrue(payload["ok"])
+        drawing.SetupSheet5.assert_not_called()
+
+
+class AutoDimensionViewTests(unittest.TestCase):
+    def drawing(self, *, activate=True, select=True, active_name="Drawing View2"):
+        state = {"dimensions": 0}
+        view = SimpleNamespace(
+            GetName2=lambda: "Drawing View2",
+            Type=4,
+            GetDimensionCount4=lambda: state["dimensions"],
+            GetNextView=lambda: None,
+        )
+        sheet = SimpleNamespace(
+            GetName2=lambda: "Sheet1",
+            Type=1,
+            GetNextView=lambda: view,
+        )
+        ext = Mock()
+        ext.SelectByID2.return_value = select
+        activate_view = Mock(return_value=activate)
+        auto_dimension = Mock(side_effect=lambda *args: state.update(dimensions=5) or 0)
+        doc = SimpleNamespace(
+            GetFirstView=lambda: sheet,
+            ActivateView=activate_view,
+            ActiveDrawingView=view if active_name == "Drawing View2" else SimpleNamespace(GetName2=lambda: active_name),
+            Extension=ext,
+            AutoDimension=auto_dimension,
+            ClearSelection2=lambda _all: None,
+        )
+        return doc, ext
+
+    def test_selects_requested_view_before_auto_dimensioning(self):
+        doc, ext = self.drawing()
+        with patch.object(sw_drawing, "require_drawing", return_value=(Mock(), doc)), \
+                patch.object(sw_drawing, "rebuild", return_value=[]):
+            payload = sw_drawing.auto_dimension_view({"view_name": "Drawing View2"})
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["dimensions_added"], 5)
+        self.assertEqual(payload["data"]["view_name"], "Drawing View2")
+        ext.SelectByID2.assert_called_once()
+        self.assertEqual(ext.SelectByID2.call_args.args[:2], ("Drawing View2", "DRAWINGVIEW"))
+
+    def test_refuses_when_requested_view_did_not_become_active(self):
+        doc, _ = self.drawing(active_name="Drawing View4")
+        with patch.object(sw_drawing, "require_drawing", return_value=(Mock(), doc)):
+            payload = sw_drawing.auto_dimension_view({"view_name": "Drawing View2"})
+        self.assertFalse(payload["ok"])
+        doc.AutoDimension.assert_not_called()
+
+    def test_refuses_when_requested_view_cannot_be_activated(self):
+        doc, _ = self.drawing(activate=False)
+        with patch.object(sw_drawing, "require_drawing", return_value=(Mock(), doc)):
+            payload = sw_drawing.auto_dimension_view({"view_name": "Missing View"})
+        self.assertFalse(payload["ok"])
+        doc.AutoDimension.assert_not_called()
+
+    def test_refuses_when_requested_view_cannot_be_selected(self):
+        doc, _ = self.drawing(select=False)
+        with patch.object(sw_drawing, "require_drawing", return_value=(Mock(), doc)):
+            payload = sw_drawing.auto_dimension_view({"view_name": "Drawing View2"})
+        self.assertFalse(payload["ok"])
+        doc.AutoDimension.assert_not_called()
+
 
 class MaterialReadbackTests(unittest.TestCase):
     def test_byref_name(self):

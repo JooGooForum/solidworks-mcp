@@ -251,18 +251,44 @@ def create_drawing(args: dict[str, Any]) -> dict[str, Any]:
         return created
     _, doc = require_drawing()
 
-    if args.get("paper_size") or args.get("first_angle") is not None or args.get("scale_numerator"):
+    override_keys = {"paper_size", "scale_numerator", "scale_denominator", "first_angle"}
+    if override_keys.intersection(args):
         sheet = value(doc, "GetCurrentSheet")
         name = str(safe(sheet, "GetName", "") or "")
-        size = PAPER_SIZES.get(str(args.get("paper_size", "")), int(safe(sheet, "GetSize", 8) or 8))
+        properties = safe(sheet, "GetProperties2")
+        current_size = int(properties[0]) if properties is not None and len(properties) >= 1 else int(safe(sheet, "GetSize", 8) or 8)
+        current_scale_numerator = float(properties[2]) if properties is not None and len(properties) >= 4 else 1.0
+        current_scale_denominator = float(properties[3]) if properties is not None and len(properties) >= 4 else 1.0
+        current_first_angle = bool(properties[4]) if properties is not None and len(properties) >= 5 else True
+        current_width = float(properties[5]) if properties is not None and len(properties) >= 7 else 0.0
+        current_height = float(properties[6]) if properties is not None and len(properties) >= 7 else 0.0
+        sheet_format = str(safe(sheet, "GetTemplateName", "") or "")
+        size = PAPER_SIZES.get(str(args.get("paper_size", "")), current_size)
         try:
             doc.SetupSheet5(
                 name, size, 12 if size == 12 else size,
-                float(args.get("scale_numerator", 1)), float(args.get("scale_denominator", 1)),
-                bool(args.get("first_angle", True)), "", 0.0, 0.0, "", True,
+                float(args.get("scale_numerator", current_scale_numerator)),
+                float(args.get("scale_denominator", current_scale_denominator)),
+                bool(args.get("first_angle", current_first_angle)), sheet_format,
+                current_width if size == 12 else 0.0, current_height if size == 12 else 0.0,
+                "", True,
             )
         except Exception as exc:
             logger.info("Sheet setup was declined: %s", exc)
+        if sheet_format:
+            updated_sheet = value(doc, "GetCurrentSheet")
+            updated_format = str(safe(updated_sheet, "GetTemplateName", "") or "")
+            if updated_format.lower() != sheet_format.lower():
+                return result(
+                    False,
+                    "SOLIDWORKS changed the inherited sheet format while applying sheet overrides.",
+                    document=document_info(doc),
+                    template=created["data"].get("template"),
+                    verification=created["data"].get("verification"),
+                    expected_sheet_format_path=sheet_format,
+                    actual_sheet_format_path=updated_format,
+                    **_sheet_readback(doc),
+                )
     return result(
         True,
         "Created a new drawing.",
@@ -873,11 +899,33 @@ def insert_model_annotations(args: dict[str, Any]) -> dict[str, Any]:
 )
 def auto_dimension_view(args: dict[str, Any]) -> dict[str, Any]:
     _, doc = require_drawing()
-    if args.get("view_name"):
-        if not bool(doc.ActivateView(str(args["view_name"]))):
-            return result(False, f"No view named '{args['view_name']}'.")
+    requested_name = str(args.get("view_name") or "")
+    if requested_name and not bool(doc.ActivateView(requested_name)):
+        return result(False, f"No view named '{requested_name}'.")
 
-    before = [_view_entry(v, i) for i, v in enumerate(_iter_views(doc))]
+    active_view = safe(doc, "ActiveDrawingView")
+    active_name = str(safe(active_view, "GetName2", "") or "") if active_view is not None else ""
+    target_name = requested_name or active_name
+    if not target_name:
+        return result(False, "No active drawing view is available to auto-dimension.")
+    if requested_name and active_name and active_name != requested_name:
+        return result(
+            False,
+            f"SOLIDWORKS did not activate requested view '{requested_name}' (active: '{active_name}').",
+            requested_view=requested_name,
+            active_view=active_name,
+        )
+
+    target_before = next((v for v in _iter_views(doc) if str(safe(v, "GetName2", "") or "") == target_name), None)
+    if target_before is None:
+        return result(False, f"No view named '{target_name}'.")
+
+    clear_selection(doc)
+    selected = bool(extension(doc).SelectByID2(target_name, "DRAWINGVIEW", 0.0, 0.0, 0.0, False, 0, nothing(), 0))
+    if not selected:
+        return result(False, f"SOLIDWORKS did not select drawing view '{target_name}'.")
+
+    before_count = int(_view_entry(target_before, 0).get("dimensions", 0))
     status = int(
         doc.AutoDimension(
             AUTODIM_ENTITIES[str(args.get("entities", "all"))],
@@ -889,12 +937,16 @@ def auto_dimension_view(args: dict[str, Any]) -> dict[str, Any]:
     )
     rebuild(doc)
     after = [_view_entry(v, i) for i, v in enumerate(_iter_views(doc))]
-    added = sum(int(v.get("dimensions", 0)) for v in after) - sum(int(v.get("dimensions", 0)) for v in before)
+    target_after = next((v for v in after if v.get("name") == target_name), None)
+    if target_after is None:
+        return result(False, f"Drawing view '{target_name}' disappeared after auto-dimensioning.", status=status, views=after)
+    added = int(target_after.get("dimensions", 0)) - before_count
     return result(
         added > 0,
         f"Auto-dimensioning added {added} dimensions."
         if added > 0 else f"Auto-dimensioning added nothing (status {status}).",
         status=status,
+        view_name=target_name,
         dimensions_added=added,
         views=after,
     )

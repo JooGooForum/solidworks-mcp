@@ -94,6 +94,13 @@ that limitation instead of claiming native source verification. Drawing results
 also read back the active sheet size, scale, projection method, and sheet-format
 path when SOLIDWORKS exposes it.
 
+When drawing overrides such as projection, scale, or paper size are requested,
+`create_drawing` preserves the sheet-format path inherited from the template and
+verifies it after `SetupSheet5`. Template-provided auxiliary sheets are left
+intact. `auto_dimension_view` activates and explicitly selects the requested
+drawing view before calling `IDrawingDoc.AutoDimension`, then reports dimensions
+added to that view rather than a document-wide count.
+
 ## Testing
 
 ```powershell
