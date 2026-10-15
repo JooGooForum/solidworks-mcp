@@ -65,6 +65,7 @@ from . import sw_boundary  # noqa: F401
 from . import sw_wrap  # noqa: F401
 from . import sw_dome  # noqa: F401
 from . import sw_sheetmetal  # noqa: F401
+from . import sw_sheetmetal_workflows  # noqa: F401
 from . import sw_weldment  # noqa: F401
 from . import sw_motion  # noqa: F401
 from . import sw_geometry  # noqa: F401

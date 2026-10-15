@@ -7,7 +7,7 @@ Third-party vendor add-ins (JLC/嘉立创 and similar) are out of scope.
 
 *Covered* means a dedicated tool with explicit units and selection rules that
 reads the real result back and has been verified against a live session.
-Anything weaker is listed as not covered. 192 tools are registered today; that
+Anything weaker is listed as not covered. 212 tools are registered today; that
 is a count, not a coverage claim.
 
 ## Core SOLIDWORKS
@@ -20,7 +20,7 @@ is a count, not a coverage claim.
 | Solid features | Boss/cut extrude (incl. through-all-both), revolve, fillet, chamfer, shell, draft, rib, simple hole, sweep, loft, linear and circular pattern, mirror, delete / rename / suppress, ordered feature list | Boundary boss/base, threads, hole wizard and hole series, split, indent, intersect, deform, flex, freeform, thin features, multi-thickness shell, draft analysis |
 | Multibody and direct editing | Scale (uniform or X/Y/Z, about centroid or origin), move / copy / rotate bodies, combine (add, subtract, intersect), delete / keep bodies, move face (offset, translate, rotate), delete face with patch, replace face | Save bodies, split bodies, mirror bodies, delete-face fill and tangent-fill modes (created but not confirmed), import-geometry repair |
 | Surfaces | Extruded, planar, revolved, lofted, swept, boundary, ruled and filled surfaces, extend, untrim, trim (preview, apply, data), knit, thicken, offset, mid-surface (create and data), surface-hole deletion, cut with surface, surface-body area listing | Mutual-trim knit variant, fill curvature continuity (not confirmed here), ruled reverse-normal (not confirmed here), mid-surface placement (ignored here), surface flatten, mesh BREP |
-| Sheet metal | Base flange, parameter read/edit (thickness, bend radius, K-factor), flatten / fold, flat-pattern DXF export | Edge flange, miter flange, hem, jog, closed corner, corner relief, convert to sheet metal, forming tools, bend tables |
+| Sheet metal | Base/edge flange, hem, sketched bend, normal cut, native selective unfold/fold, parameter read/edit, flat-pattern state/DXF export, sheet-metal profile discovery, persistent-reference inspection tokens, disposable plate/panel workflows, geometry/volume/rebuild verification, direct sketch-line/model-edge collinearity; jog, rip, break corner, closed corner and corner relief have native implementations plus offline contract tests | Miter flange, convert to sheet metal, forming tools, bend tables; jog/rip/corner primitives still require their dedicated disposable-part live regressions before they meet the strict live-verified definition above |
 | Weldments | Weldment feature, profile listing, size configurations, structural members, cut-list read and update | Trim / extend members, end caps, gussets, weld beads, bounding box, structural systems |
 | Assemblies and mates | Component insert / list / fix / visibility / suppression / configuration, add and list mates | Replace, delete, pattern and mirror components, virtual components, in-place editing, subassemblies, mate limits, mechanical mates (gear, screw, rack and pinion, cam, hinge, coupler), interference and clearance checks, explode, display states, section views |
 | Drawings | Sheets, standard / model / projected / section / detail views, view sketches, model annotations, auto-dimension, centre marks and lines, notes, view move / scale / label | Auxiliary, broken-out, alternate-position and crop views, view alignment, BOM / hole / revision tables, tolerances, GD&T, surface finish, weld symbols, hole callouts, balloons, blocks, sheet formats |
@@ -47,9 +47,15 @@ is a count, not a coverage claim.
 ## How a claim is checked
 
 ```powershell
-python -m unittest discover -s tests -p 'test_*.py'          # 225 offline checks
+python -m unittest discover -s tests -p 'test_*.py'          # offline checks
 python tests/live_p0_regression.py                           # live, per domain
-python tools/verify_install.py --install <dir> --tool-count 192 --scratch
+python -m tests.live_sheetmetal_workflows_regression             # disposable plates/panel
+python -m tests.live_sheetmetal_fabrication_regression       # edge flange + unfold/fold
+python -m tests.live_sheetmetal_primitives_regression        # hem + normal cut + bend + parameters
+python -m tests.live_sheetmetal_regression                   # flat pattern + parsed DXF entities/bend layers
+python -m tests.live_sheetmetal_alignment_regression         # guarded direct collinearity
+python -m tests.live_rollback_regression                      # rollback + volume
+python tools/verify_install.py --install <dir> --tool-count 212 --scratch
 python tools/build_api_inventory.py --official-modules --output <file>
 ```
 

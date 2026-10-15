@@ -53,6 +53,7 @@ from .sw_core import (
     require_part,
     require_selection,
     result,
+    safe,
     selectable,
     SELECTION_SCHEMA,
     select_sketch_for_feature,
@@ -726,6 +727,92 @@ def mirror_feature(args: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 # Feature-tree maintenance
 # --------------------------------------------------------------------------
+
+
+_ROLLBACK_POSITIONS = {
+    "end": 1,             # swMoveRollbackBarToEnd
+    "before_feature": 3,  # swMoveRollbackBarToBeforeFeature
+    "after_feature": 4,   # swMoveRollbackBarToAfterFeature
+}
+
+
+def _rollback_states(doc: Any) -> list[dict[str, Any]]:
+    states: list[dict[str, Any]] = []
+    for feature in iter_feature_objects(doc):
+        name = str(feature_property(feature, "Name", ""))
+        if not name:
+            continue
+        states.append({"name": name, "rolled_back": bool(safe(feature, "IsRolledBack", False))})
+    return states
+
+
+@tool(
+    "set_rollback_bar",
+    "Move the rollback bar in the active part to the end, or immediately before/after an exact feature. "
+    "Reads every feature's native IsRolledBack state back afterwards and rebuilds when moving to the end. "
+    "Does not save the document.",
+    {
+        "position": {
+            "type": "string",
+            "enum": sorted(_ROLLBACK_POSITIONS),
+            "description": "end rolls fully forward; before_feature and after_feature require feature_name.",
+        },
+        "feature_name": {
+            "type": "string",
+            "description": "Exact feature name from list_features; required unless position is end.",
+        },
+    },
+    ["position"],
+)
+def set_rollback_bar(args: dict[str, Any]) -> dict[str, Any]:
+    _, doc = require_part()
+    exit_active_sketch(doc)
+    position = str(args["position"])
+    feature_name = str(args.get("feature_name", "")).strip()
+
+    if position not in _ROLLBACK_POSITIONS:
+        return result(False, f"Unsupported rollback position '{position}'.")
+    if position == "end":
+        if feature_name:
+            return result(False, "feature_name must be omitted when position is 'end'.")
+    else:
+        if not feature_name:
+            return result(False, f"feature_name is required when position is '{position}'.")
+        if find_feature(doc, feature_name) is None:
+            return result(False, f"No feature named '{feature_name}' exists in this document.")
+
+    manager = feature_manager(doc)
+    moved = bool(manager.EditRollback(_ROLLBACK_POSITIONS[position], feature_name))
+    if not moved:
+        return result(False, "SOLIDWORKS refused to move the rollback bar.")
+
+    rebuilt = None
+    problems: list[dict[str, Any]] = []
+    if position == "end":
+        rebuilt = bool(rebuild(doc))
+        problems = whats_wrong(doc)
+
+    states = _rollback_states(doc)
+    rolled_back = [entry["name"] for entry in states if entry["rolled_back"]]
+    state_by_name = {entry["name"]: entry["rolled_back"] for entry in states}
+    verified = not rolled_back if position == "end" else state_by_name.get(feature_name) == (position == "before_feature")
+
+    message = f"Moved rollback bar to {position.replace('_', ' ')}."
+    if not verified:
+        message = "SOLIDWORKS moved the rollback bar, but native feature-state readback did not match the requested position."
+    elif problems:
+        message = "Moved rollback bar to end, but the rebuilt model has errors or warnings."
+
+    return result(
+        verified and not problems,
+        message,
+        position=position,
+        feature_name=feature_name or None,
+        rolled_back_features=rolled_back,
+        rebuilt=rebuilt,
+        problems=problems,
+        saved=False,
+    )
 
 
 @tool(
