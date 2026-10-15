@@ -29,8 +29,9 @@ Sheet coordinates are millimetres from the lower-left corner of the sheet.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .sw_core import (
     active_document,
@@ -800,6 +801,75 @@ def set_drawing_view(args: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 
 
+PER_STANDARD_LAYER = "-Per Standard-"
+
+
+def _layer_manager(doc: Any) -> Any:
+    manager = value(doc, "GetLayerManager")
+    if manager is None:
+        raise RuntimeError("SOLIDWORKS did not expose the drawing layer manager.")
+    return manager
+
+
+@contextmanager
+def _create_annotations_per_standard(doc: Any) -> Iterator[dict[str, Any]]:
+    """Make connector-created annotations inherit SOLIDWORKS Per Standard.
+
+    Per Standard is a layer-manager pseudo-state, not a named drawing layer.
+    Preserve the user's current layer and restore it even when the native
+    annotation command fails.
+    """
+    manager = _layer_manager(doc)
+    previous = str(value(manager, "GetCurrentLayer") or "")
+    if not bool(manager.SetCurrentLayer(PER_STANDARD_LAYER)):
+        raise RuntimeError("SOLIDWORKS refused to select the Per Standard annotation layer.")
+    selected = str(value(manager, "GetCurrentLayer") or "")
+    if selected != PER_STANDARD_LAYER:
+        raise RuntimeError(
+            f"SOLIDWORKS selected annotation layer '{selected}', not '{PER_STANDARD_LAYER}'."
+        )
+    state = {"creation_layer": selected, "restored_layer": previous}
+    try:
+        yield state
+    finally:
+        if not bool(manager.SetCurrentLayer(previous)):
+            raise RuntimeError(f"SOLIDWORKS could not restore drawing layer '{previous}'.")
+        restored = str(value(manager, "GetCurrentLayer") or "")
+        if restored != previous:
+            raise RuntimeError(
+                f"SOLIDWORKS restored drawing layer '{restored}', expected '{previous}'."
+            )
+
+
+def _annotation_object(item: Any) -> Any:
+    """Return IAnnotation from a direct annotation or annotation owner."""
+    if item is None:
+        return None
+    if hasattr(item, "Layer") or hasattr(item, "LayerOverride"):
+        return item
+    return safe(item, "GetAnnotation")
+
+
+def _set_per_standard(items: Any) -> dict[str, Any]:
+    """Reset returned annotations to the layer/override state behind Per Standard."""
+    checked = 0
+    for item in as_list(items):
+        annotation = _annotation_object(item)
+        if annotation is None:
+            continue
+        annotation.Layer = ""
+        annotation.LayerOverride = 0
+        layer = str(value(annotation, "Layer") or "")
+        override = int(value(annotation, "LayerOverride") or 0)
+        if layer or override:
+            raise RuntimeError(
+                f"Annotation layer readback did not match Per Standard: layer={layer!r}, "
+                f"override={override}."
+            )
+        checked += 1
+    return {"annotations_verified_per_standard": checked}
+
+
 @tool(
     "insert_model_annotations",
     "Import the model's own dimensions and annotations onto the drawing (Insert > Model Items). "
@@ -857,13 +927,15 @@ def insert_model_annotations(args: dict[str, Any]) -> dict[str, Any]:
     if not bool(doc.ActivateView(view_name)):
         return result(False, f"SOLIDWORKS could not activate drawing view '{view_name}'.")
 
-    inserted = doc.InsertModelAnnotations3(
-        source, mask,
-        bool(args.get("all_views", True)),
-        bool(args.get("duplicate_dimensions", False)),
-        bool(args.get("hidden_feature_dimensions", False)),
-        False,
-    )
+    with _create_annotations_per_standard(doc) as layer_state:
+        inserted = doc.InsertModelAnnotations3(
+            source, mask,
+            bool(args.get("all_views", True)),
+            bool(args.get("duplicate_dimensions", False)),
+            bool(args.get("hidden_feature_dimensions", False)),
+            False,
+        )
+        annotation_state = _set_per_standard(inserted)
     rebuild(doc)
     clear_selection(doc)
     views = [_view_entry(v, i) for i, v in enumerate(_iter_views(doc))]
@@ -879,6 +951,8 @@ def insert_model_annotations(args: dict[str, Any]) -> dict[str, Any]:
         types=wanted,
         view_name=view_name,
         dimensions_added=added,
+        **layer_state,
+        **annotation_state,
         views=views,
     )
 
@@ -926,15 +1000,16 @@ def auto_dimension_view(args: dict[str, Any]) -> dict[str, Any]:
         return result(False, f"SOLIDWORKS did not select drawing view '{target_name}'.")
 
     before_count = int(_view_entry(target_before, 0).get("dimensions", 0))
-    status = int(
-        doc.AutoDimension(
-            AUTODIM_ENTITIES[str(args.get("entities", "all"))],
-            AUTODIM_SCHEMES[str(args.get("horizontal_scheme", "baseline"))],
-            HORIZONTAL_PLACEMENT[str(args.get("horizontal_placement", "below"))],
-            AUTODIM_SCHEMES[str(args.get("vertical_scheme", "baseline"))],
-            VERTICAL_PLACEMENT[str(args.get("vertical_placement", "left"))],
+    with _create_annotations_per_standard(doc) as layer_state:
+        status = int(
+            doc.AutoDimension(
+                AUTODIM_ENTITIES[str(args.get("entities", "all"))],
+                AUTODIM_SCHEMES[str(args.get("horizontal_scheme", "baseline"))],
+                HORIZONTAL_PLACEMENT[str(args.get("horizontal_placement", "below"))],
+                AUTODIM_SCHEMES[str(args.get("vertical_scheme", "baseline"))],
+                VERTICAL_PLACEMENT[str(args.get("vertical_placement", "left"))],
+            )
         )
-    )
     rebuild(doc)
     after = [_view_entry(v, i) for i, v in enumerate(_iter_views(doc))]
     target_after = next((v for v in after if v.get("name") == target_name), None)
@@ -948,6 +1023,7 @@ def auto_dimension_view(args: dict[str, Any]) -> dict[str, Any]:
         status=status,
         view_name=target_name,
         dimensions_added=added,
+        **layer_state,
         views=after,
     )
 
@@ -1055,30 +1131,34 @@ def insert_center_marks(args: dict[str, Any]) -> dict[str, Any]:
         # late-bound Python.  The API's own view-scoped automatic command does,
         # and covers holes, fillets, and slots (the three supported classes).
         before = _center_mark_count(view)
-        ok = bool(
-            flag_methods(view, "AutoInsertCenterMarks2").AutoInsertCenterMarks2(
-                1 | 2 | 4,  # holes, fillets, slots
-                1 | 2 | 8,  # linear, circular, and base connection lines
-                bool(args.get("slots", False)), bool(args.get("slots", False)),
-                True, 0.0, 0.0, False, False, 0.0,
+        with _create_annotations_per_standard(doc) as layer_state:
+            ok = bool(
+                flag_methods(view, "AutoInsertCenterMarks2").AutoInsertCenterMarks2(
+                    1 | 2 | 4,  # holes, fillets, slots
+                    1 | 2 | 8,  # linear, circular, and base connection lines
+                    bool(args.get("slots", False)), bool(args.get("slots", False)),
+                    True, 0.0, 0.0, False, False, 0.0,
+                )
             )
-        )
         rebuild(doc)
         total = _center_mark_count(view)
         return result(
             ok,
             "Inserted automatic center marks." if ok else "SOLIDWORKS added no center marks.",
             method="AutoInsertCenterMarks2",
+            **layer_state,
             legacy_center_mark_features_before=before,
             legacy_center_mark_features=total,
         )
 
     picked = _select_circular_edges(doc, view)
-    marks = doc.InsertCenterMark3(
-        CENTER_MARK_STYLES[str(args.get("style", "single"))],
-        bool(args.get("propagate", True)),
-        bool(args.get("slots", False)),
-    )
+    with _create_annotations_per_standard(doc) as layer_state:
+        marks = doc.InsertCenterMark3(
+            CENTER_MARK_STYLES[str(args.get("style", "single"))],
+            bool(args.get("propagate", True)),
+            bool(args.get("slots", False)),
+        )
+        annotation_state = _set_per_standard(marks)
     rebuild(doc)
     clear_selection(doc)
     return result(
@@ -1087,6 +1167,8 @@ def insert_center_marks(args: dict[str, Any]) -> dict[str, Any]:
         else "SOLIDWORKS added no center marks to the selected entities.",
         circles_selected=picked,
         method="InsertCenterMark3",
+        **layer_state,
+        **annotation_state,
     )
 
 
@@ -1108,13 +1190,14 @@ def insert_centerlines(args: dict[str, Any]) -> dict[str, Any]:
         # ICenterLine objects.  Asking InsertCenterLine2 to infer them from
         # raw model edges silently does nothing in a part view.  Use the
         # drawing-view command that SOLIDWORKS itself uses for hole axes.
-        ok = bool(
-            flag_methods(view, "AutoInsertCenterMarks2").AutoInsertCenterMarks2(
-                1,  # hole centers
-                1 | 2 | 8,
-                False, False, True, 0.0, 0.0, False, False, 0.0,
+        with _create_annotations_per_standard(doc) as layer_state:
+            ok = bool(
+                flag_methods(view, "AutoInsertCenterMarks2").AutoInsertCenterMarks2(
+                    1,  # hole centers
+                    1 | 2 | 8,
+                    False, False, True, 0.0, 0.0, False, False, 0.0,
+                )
             )
-        )
         rebuild(doc)
         return result(
             ok,
@@ -1122,9 +1205,12 @@ def insert_centerlines(args: dict[str, Any]) -> dict[str, Any]:
             else "SOLIDWORKS added no hole axes to this view.",
             method="AutoInsertCenterMarks2",
             centerline_kind="center_marks",
+            **layer_state,
         )
 
-    lines = doc.InsertCenterLine2()
+    with _create_annotations_per_standard(doc) as layer_state:
+        lines = doc.InsertCenterLine2()
+        annotation_state = _set_per_standard(lines)
     rebuild(doc)
     clear_selection(doc)
     count = len(as_list(lines))
@@ -1134,6 +1220,8 @@ def insert_centerlines(args: dict[str, Any]) -> dict[str, Any]:
         "SOLIDWORKS added no centerlines to the selected entities.",
         count=count,
         method="InsertCenterLine2",
+        **layer_state,
+        **annotation_state,
     )
 
 
@@ -1152,7 +1240,9 @@ def insert_centerlines(args: dict[str, Any]) -> dict[str, Any]:
 def add_note(args: dict[str, Any]) -> dict[str, Any]:
     _, doc = require_drawing()
     clear_selection(doc)
-    note = flag_methods(doc, "InsertNote").InsertNote(str(args["text"]))
+    with _create_annotations_per_standard(doc) as layer_state:
+        note = flag_methods(doc, "InsertNote").InsertNote(str(args["text"]))
+        annotation_state = _set_per_standard(note)
     if note is None:
         return result(False, "SOLIDWORKS did not create the note.")
     try:
@@ -1166,5 +1256,11 @@ def add_note(args: dict[str, Any]) -> dict[str, Any]:
         logger.info("The note was created but could not be positioned or restyled.")
     rebuild(doc)
     clear_selection(doc)
-    return result(True, "Added a note.", text=str(args["text"]))
+    return result(
+        True,
+        "Added a note.",
+        text=str(args["text"]),
+        **layer_state,
+        **annotation_state,
+    )
 

@@ -203,6 +203,11 @@ class DocumentTemplateTests(unittest.TestCase):
 class AutoDimensionViewTests(unittest.TestCase):
     def drawing(self, *, activate=True, select=True, active_name="Drawing View2"):
         state = {"dimensions": 0}
+        layer_state = {"current": "Dimensions"}
+        layer_manager = SimpleNamespace(
+            GetCurrentLayer=lambda: layer_state["current"],
+            SetCurrentLayer=lambda name: layer_state.update(current=name) or True,
+        )
         view = SimpleNamespace(
             GetName2=lambda: "Drawing View2",
             Type=4,
@@ -223,6 +228,7 @@ class AutoDimensionViewTests(unittest.TestCase):
             ActivateView=activate_view,
             ActiveDrawingView=view if active_name == "Drawing View2" else SimpleNamespace(GetName2=lambda: active_name),
             Extension=ext,
+            GetLayerManager=lambda: layer_manager,
             AutoDimension=auto_dimension,
             ClearSelection2=lambda _all: None,
         )

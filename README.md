@@ -101,6 +101,16 @@ intact. `auto_dimension_view` activates and explicitly selects the requested
 drawing view before calling `IDrawingDoc.AutoDimension`, then reports dimensions
 added to that view rather than a document-wide count.
 
+### Drawing annotation layers
+
+Annotations created by `insert_model_annotations`, `auto_dimension_view`,
+`insert_center_marks`, `insert_centerlines`, and `add_note` default to the
+SOLIDWORKS **Per Standard** state. The connector temporarily selects the native
+`-Per Standard-` layer-manager state, restores the previously active layer after
+the operation, and resets returned annotations to an empty named layer with no
+color, line-style, or line-width override. Existing annotations—including
+title-block content supplied by a drawing template—are not reassigned.
+
 ## Testing
 
 ```powershell
